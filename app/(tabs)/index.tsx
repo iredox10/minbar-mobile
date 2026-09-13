@@ -141,7 +141,7 @@ export default function HomeScreen() {
 
   const configured = isAppwriteConfigured();
 
-  const cardGap = 16;
+  const cardGap = 12;
   const cardWidth = (width - 32 - cardGap) / 2;
 
   const resume = (item: PlaybackHistory) => {
@@ -353,7 +353,8 @@ export default function HomeScreen() {
             {featuredSeries.error ? (
               <EmptyState title={t("noContentAvailableYet")} />
             ) : (
-              <View className="flex-row justify-between gap-3">
+              {/* 2-col grid like web (grid-cols-2) — must wrap */}
+              <View className="flex-row flex-wrap gap-3">
                 {series.slice(0, 6).map((item, index) => (
                   <Pressable
                     key={item.$id}
