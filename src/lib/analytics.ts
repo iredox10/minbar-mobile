@@ -14,7 +14,8 @@ export type AnalyticsEventType =
   | "favorite_add"
   | "favorite_remove"
   | "radio_start"
-  | "dua_view";
+  | "dua_view"
+  | "screen_view";
 
 export interface AnalyticsEvent {
   eventType: AnalyticsEventType;
@@ -91,6 +92,22 @@ export function trackFavoriteAdd(itemId: string, itemType: "episode" | "series" 
 
 export function trackRadioStart(stationId: string, stationName: string): void {
   trackEvent({ eventType: "radio_start", itemId: stationId, itemType: "radio", itemTitle: stationName });
+}
+
+export function trackPlayPause(itemId: string, itemType: "episode" | "radio", itemTitle: string): void {
+  trackEvent({ eventType: "play_pause", itemId, itemType, itemTitle });
+}
+
+export function trackDownloadStart(itemId: string, itemTitle: string): void {
+  trackEvent({ eventType: "download_start", itemId, itemType: "episode", itemTitle });
+}
+
+export function trackFavoriteRemove(itemId: string, itemType: "episode" | "series" | "dua", itemTitle: string): void {
+  trackEvent({ eventType: "favorite_remove", itemId, itemType, itemTitle });
+}
+
+export function trackScreenView(screen: string): void {
+  trackEvent({ eventType: "screen_view", itemId: screen, itemTitle: screen });
 }
 
 export function trackDuaView(duaId: string, duaTitle: string): void {

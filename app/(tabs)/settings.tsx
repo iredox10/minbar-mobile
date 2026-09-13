@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
-import { Image, Pressable, Switch, Text, View } from "react-native";
+import { Alert, Image, Pressable, Switch, Text, View } from "react-native";
 import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ChevronRight,
   Download as DownloadIcon,
+  HardDrive,
   Heart,
   LogOut,
   Monitor,
   Moon,
+  RefreshCw,
   Sliders,
   Sparkles,
   Sun,
   Timer,
+  Trash2,
   UserCircle,
   Wifi,
   Zap,
@@ -24,7 +28,10 @@ import { usePlayer } from "@/context/PlayerContext";
 import { useUser } from "@/context/UserContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getSettings, updateSettings } from "@/lib/db";
+import { deleteDownloaded, listDownloads } from "@/lib/downloads";
 import { PLAYBACK_SPEEDS, cn, getPlaybackSpeedLabel } from "@/lib/utils";
+
+const LAST_SYNC_KEY = "arewa-last-sync";
 
 const THEME_OPTIONS: { value: ThemeMode; icon: typeof Sun; labelKey: "light" | "dark" | "system" }[] = [
   { value: "light", icon: Sun, labelKey: "light" },
@@ -43,6 +50,26 @@ export default function SettingsScreen() {
     usePlayer();
   const [wifiOnly, setWifiOnly] = useState(true);
   const [autoDownload, setAutoDownload] = useState(false);
+  const [storageBytes, setStorageBytes] = useState(0);
+  const [storageCount, setStorageCount] = useState(0);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
+
+  const loadStorage = async () => {
+    try {
+      const dls = await listDownloads();
+      setStorageCount(dls.length);
+      setStorageBytes(dls.reduce((sum, d) => sum + (d.fileSize ?? 0), 0));
+    } catch {
+      // best-effort: offline or FS unavailable
+    }
+    try {
+      const ts = await AsyncStorage.getItem(LAST_SYNC_KEY);
+      setLastSync(ts);
+    } catch {
+      // best-effort: ignore
+    }
+  };
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -51,6 +78,7 @@ export default function SettingsScreen() {
         setAutoDownload(s.autoDownload);
       }
     });
+    loadStorage();
   }, []);
 
   const toggleWifiOnly = async (value: boolean) => {
@@ -61,6 +89,30 @@ export default function SettingsScreen() {
   const toggleAutoDownload = async (value: boolean) => {
     setAutoDownload(value);
     await updateSettings({ autoDownload: value });
+  };
+
+  const storageMb = (storageBytes / (1024 * 1024)).toFixed(1);
+
+  const doClearCache = async () => {
+    setClearing(true);
+    try {
+      const dls = await listDownloads();
+      for (const d of dls) {
+        await deleteDownloaded(d.episodeId);
+      }
+      await loadStorage();
+    } catch {
+      // best-effort: keep fire-and-forget
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const handleClearCache = () => {
+    Alert.alert(t("clearCache"), `${storageCount} · ${storageMb} MB`, [
+      { text: t("cancel"), style: "cancel" },
+      { text: t("clearCache"), style: "destructive", onPress: () => void doClearCache() },
+    ]);
   };
 
   const handleLanguageChange = (lang: "en" | "ha") => {
@@ -314,6 +366,58 @@ export default function SettingsScreen() {
             value={autoDownload}
             onToggle={toggleAutoDownload}
           />
+          <View className="h-px bg-slate-100 dark:bg-slate-800" />
+          {/* Storage used meter */}
+          <View className="px-4 py-3">
+            <View className="flex-row items-center gap-3">
+              <View className="rounded-xl bg-slate-800 p-2">
+                <HardDrive size={20} color="#94a3b8" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-sm font-medium text-slate-200 dark:text-slate-100">
+                  {t("storage")}
+                </Text>
+                <Text className="mt-0.5 text-xs text-slate-500">
+                  {storageMb} MB {t("totalUsed")} · {storageCount}
+                </Text>
+              </View>
+              <Pressable
+                onPress={handleClearCache}
+                disabled={clearing || storageCount === 0}
+                className="flex-row items-center gap-1.5 rounded-xl bg-rose-500/10 px-3 py-2 active:bg-rose-500/20"
+              >
+                <Trash2 size={16} color="#fb7185" />
+                <Text className="text-xs font-medium text-rose-400">
+                  {t("clearCache")}
+                </Text>
+              </Pressable>
+            </View>
+            <View className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800">
+              <View
+                className="h-full rounded-full bg-primary"
+                style={{ width: `${Math.min(100, (storageBytes / (200 * 1024 * 1024)) * 100)}%` }}
+              />
+            </View>
+          </View>
+          <View className="h-px bg-slate-100 dark:bg-slate-800" />
+          {/* Sync status row (best-effort) */}
+          <View className="flex-row items-center gap-3 px-4 py-3">
+            <View className="rounded-xl bg-slate-800 p-2">
+              <RefreshCw size={20} color="#94a3b8" />
+            </View>
+            <View className="flex-1">
+              <Text className="text-sm font-medium text-slate-200 dark:text-slate-100">
+                Last sync
+              </Text>
+              <Text className="mt-0.5 text-xs text-slate-500">
+                {(() => {
+                  if (!lastSync) return "—";
+                  const d = new Date(lastSync);
+                  return Number.isNaN(d.getTime()) ? lastSync : d.toLocaleString();
+                })()}
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
 
