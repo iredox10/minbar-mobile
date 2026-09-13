@@ -39,7 +39,14 @@ import {
   isAppwriteConfigured,
 } from "@/lib/appwrite";
 import { getInProgressHistory, isDownloaded } from "@/lib/db";
-import { downloadEpisode } from "@/lib/downloads";
+import {
+  deleteDownloaded,
+  downloadEpisode,
+  getProgress,
+  isDownloading,
+  subscribeDownloads,
+  subscribeProgress,
+} from "@/lib/downloads";
 import { formatDate, formatDuration } from "@/lib/utils";
 import type { Episode, PlaybackHistory } from "@/types";
 
@@ -64,53 +71,81 @@ function EpisodeActions({ episode }: { episode: Episode }) {
   const { t } = useTranslation();
   const [downloaded, setDownloaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<number | undefined>(() =>
+    getProgress(episode.$id),
+  );
 
   useEffect(() => {
     let active = true;
     isDownloaded(episode.$id).then((v) => {
       if (active) setDownloaded(v);
     });
+    if (active) setBusy(isDownloading(episode.$id));
+    const unsubState = subscribeDownloads(() => {
+      isDownloaded(episode.$id).then((v) => {
+        if (active) setDownloaded(v);
+      });
+      if (active) setBusy(isDownloading(episode.$id));
+    });
+    const unsubProgress = subscribeProgress((id, pct) => {
+      if (active && id === episode.$id) setProgress(pct);
+    });
     return () => {
       active = false;
+      unsubState();
+      unsubProgress();
     };
   }, [episode.$id]);
 
   const handleDownload = () => {
-    if (busy) return;
+    if (downloaded) return; // web: done state is terminal, no re-download
+    if (busy) {
+      // web: tapping while downloading cancels
+      deleteDownloaded(episode.$id).catch(() => {});
+      return;
+    }
     setBusy(true);
+    setProgress(0);
     downloadEpisode(episode)
       .then(() => setDownloaded(true))
       .catch((err: unknown) => {
         const message = err instanceof Error && err.message ? err.message : t("downloadFailed");
         Alert.alert(t("downloadFailed"), message);
       })
-      .finally(() => setBusy(false));
+      .finally(() => {
+        setBusy(isDownloading(episode.$id));
+        setProgress(getProgress(episode.$id));
+      });
   };
 
   return (
     <View className="flex-row items-center">
-      <Pressable hitSlop={8} onPress={() => handleDownload()}>
-        <View className="h-9 w-9 items-center justify-center rounded-full bg-slate-800/40">
-          {downloaded ? (
-            <Check size={16} color="#34d399" />
-          ) : busy ? (
-            <ActivityIndicator size="small" color="#d4a853" />
-          ) : (
-            <Download size={16} color="#94a3b8" />
-          )}
-        </View>
-      </Pressable>
       <Pressable
         hitSlop={8}
         onPress={() =>
           Share.share({
             title: episode.title,
-            message: `${episode.title}\n${episode.description ?? ""}`,
+            message: `Listen to "${episode.title}" on Arewa Central\narewa://episodes/${episode.$id}`,
           })
         }
       >
         <View className="h-9 w-9 items-center justify-center rounded-full bg-slate-800/70">
           <Share2 size={16} color="#94a3b8" />
+        </View>
+      </Pressable>
+      <Pressable hitSlop={8} onPress={() => handleDownload()}>
+        <View className="h-9 w-9 items-center justify-center rounded-full bg-slate-800/40">
+          {downloaded ? (
+            <Check size={16} color="#34d399" />
+          ) : busy ? (
+            progress != null ? (
+              <Text className="text-[10px] font-semibold text-slate-300">{progress}%</Text>
+            ) : (
+              <ActivityIndicator size="small" color="#d4a853" />
+            )
+          ) : (
+            <Download size={16} color="#94a3b8" />
+          )}
         </View>
       </Pressable>
     </View>
