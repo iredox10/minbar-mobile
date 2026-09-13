@@ -49,6 +49,20 @@ import {
 } from "@/lib/downloads";
 import { formatDate, formatDuration } from "@/lib/utils";
 import type { Episode, PlaybackHistory } from "@/types";
+import type { CurrentTrack } from "@/types";
+
+/** Same 9 topics as web SearchPage POPULAR_TOPICS. */
+const BROWSE_TOPICS = [
+  "Tafsir",
+  "Sira",
+  "Hadisi",
+  "Fikihu",
+  "Aure",
+  "Matasa",
+  "Sallah",
+  "Ramadan",
+  "Tauhid",
+];
 
 function SectionLoading() {
   return (
@@ -206,6 +220,24 @@ export default function HomeScreen() {
       seriesId: episode.seriesId,
       episodeNumber: episode.episodeNumber,
     }).catch(() => {});
+  };
+
+  const toTrack = (episode: Episode): CurrentTrack => ({
+    id: episode.$id,
+    title: episode.title,
+    audioUrl: episode.audioUrl,
+    duration: episode.duration,
+    type: "episode",
+    seriesId: episode.seriesId,
+    episodeNumber: episode.episodeNumber,
+  });
+
+  /** Play All on Latest Episodes header — queue from latest 5-8. */
+  const playAllLatest = () => {
+    const queue = episodes.slice(0, 8).map(toTrack);
+    if (queue.length === 0) return;
+    playEpisode(queue[0], queue).catch(() => {});
+    router.push("/player");
   };
 
   const resume = (item: PlaybackHistory) => {
@@ -366,10 +398,33 @@ export default function HomeScreen() {
             </View>
           )}
 
+          {/* Browse Topics — same 9 topics as web */}
+          <View className="mt-10">
+            <SectionHeader title={t("browseTopics")} accent="#d4a853" />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerClassName="gap-2.5 px-1"
+            >
+              {BROWSE_TOPICS.map((topic) => (
+                <Pressable
+                  key={topic}
+                  onPress={() => router.push({ pathname: "/search", params: { q: topic } })}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2.5 active:bg-slate-100 dark:border-slate-700/50 dark:bg-slate-800/50 active:dark:bg-slate-700/50"
+                >
+                  <Text className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                    {topic}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+
           {/* Featured Speakers */}
           <View className="mt-10">
             <SectionHeader
               title={t("featuredSpeakers")}
+              action={speakers.length > 0 ? `${t("viewAll")} (${speakers.length})` : undefined}
               onPress={() => router.push("/speakers")}
               accent="#d4a853"
             />
@@ -423,6 +478,7 @@ export default function HomeScreen() {
           <View className="mt-10">
             <SectionHeader
               title={t("featuredSeries")}
+              action={series.length > 0 ? `${t("viewAll")} (${series.length})` : undefined}
               onPress={() => router.push("/series")}
               accent="#10b981"
             />
@@ -480,8 +536,24 @@ export default function HomeScreen() {
           <View className="mt-10">
             <SectionHeader
               title={t("latestEpisodes")}
-              onPress={() => router.push("/latest")}
               accent="#fb7185"
+              rightSlot={
+                <View className="flex-row items-center gap-4">
+                  {episodes.length > 0 ? (
+                    <Pressable onPress={playAllLatest} hitSlop={8}>
+                      <View className="flex-row items-center gap-1.5">
+                        <Play size={14} color="#d4a853" fill="#d4a853" />
+                        <Text className="text-sm font-medium text-primary">{t("playAll")}</Text>
+                      </View>
+                    </Pressable>
+                  ) : null}
+                  <Pressable onPress={() => router.push("/latest")} hitSlop={8}>
+                    <Text className="text-sm font-medium text-primary">
+                      {episodes.length > 0 ? `${t("viewAll")} (${episodes.length})` : t("viewAll")}
+                    </Text>
+                  </Pressable>
+                </View>
+              }
             />
             {latestEpisodes.error ? (
               <EmptyState title={t("noContentAvailableYet")} />

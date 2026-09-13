@@ -141,10 +141,18 @@ export async function getLatestEpisodes(limit: number = 20): Promise<Episode[]> 
 
 export async function getFeaturedSeries(limit: number = 10): Promise<Series[]> {
   if (!isAppwriteConfigured()) return [];
-  const response = await databases.listDocuments(DATABASE_ID, SERIES_COLLECTION, [
-    Query.limit(limit),
-  ]);
-  return response.documents as unknown as Series[];
+  try {
+    const response = await databases.listDocuments(DATABASE_ID, SERIES_COLLECTION, [
+      Query.equal("featured", true),
+      Query.limit(limit),
+    ]);
+    return response.documents as unknown as Series[];
+  } catch {
+    const fallback = await databases.listDocuments(DATABASE_ID, SERIES_COLLECTION, [
+      Query.limit(limit),
+    ]);
+    return fallback.documents as unknown as Series[];
+  }
 }
 
 export async function getAllSeries(): Promise<Series[]> {
