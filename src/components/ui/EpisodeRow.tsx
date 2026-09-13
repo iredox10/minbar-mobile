@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import { Play } from "lucide-react-native";
+import { Pause, Play } from "lucide-react-native";
 
 import { Artwork } from "@/components/Artwork";
+import { usePlayer } from "@/context/PlayerContext";
 import { formatDuration } from "@/lib/utils";
 import type { Episode } from "@/types";
 
@@ -12,7 +13,9 @@ interface EpisodeRowProps {
   speakerName?: string;
   artworkUrl?: string;
   showPlay?: boolean;
+  isPlaying?: boolean;
   onPress?: (episode: Episode) => void;
+  onPlay?: (episode: Episode) => void;
   trailing?: ReactNode;
 }
 
@@ -21,14 +24,39 @@ export function EpisodeRow({
   speakerName,
   artworkUrl,
   showPlay = true,
+  isPlaying: isPlayingProp,
   onPress,
+  onPlay,
   trailing,
 }: EpisodeRowProps) {
   const router = useRouter();
+  const { track, isPlaying: playerIsPlaying, playEpisode, togglePlay } = usePlayer();
+
+  const isCurrentTrack = track?.id === episode.$id;
+  const playing = isPlayingProp ?? (isCurrentTrack && playerIsPlaying);
 
   const handlePress = () => {
     onPress?.(episode);
     router.push({ pathname: "/episodes/[id]", params: { id: episode.$id } });
+  };
+
+  const handlePlayPress = () => {
+    if (isCurrentTrack) {
+      togglePlay().catch(() => {});
+    } else {
+      playEpisode({
+        id: episode.$id,
+        title: episode.title,
+        audioUrl: episode.audioUrl,
+        artworkUrl,
+        speaker: speakerName,
+        duration: episode.duration,
+        type: "episode",
+        seriesId: episode.seriesId,
+        episodeNumber: episode.episodeNumber,
+      }).catch(() => {});
+    }
+    onPlay?.(episode);
   };
 
   return (
@@ -58,9 +86,19 @@ export function EpisodeRow({
         </View>
       </View>
       {showPlay ? (
-        <View className="h-9 w-9 items-center justify-center rounded-full bg-primary/15">
-          <Play size={16} color="#d4a853" fill="#d4a853" />
-        </View>
+        <Pressable
+          onPress={handlePlayPress}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={playing ? "Pause" : "Play"}
+          className="h-9 w-9 items-center justify-center rounded-full bg-primary/15"
+        >
+          {playing ? (
+            <Pause size={16} color="#d4a853" fill="#d4a853" />
+          ) : (
+            <Play size={16} color="#d4a853" fill="#d4a853" />
+          )}
+        </Pressable>
       ) : null}
       {trailing}
     </Pressable>
