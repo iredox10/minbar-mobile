@@ -1,15 +1,30 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 
-import { setupPlayer } from "@/audio/player";
-import { addHistoryEntry, getSettings, updatePlaybackProgress, updateSettings } from "@/lib/db";
+import {
+  loadQueueState,
+  persistCloudState,
+  resolveLocalAudio,
+  saveQueueState,
+  setupPlayer,
+} from "@/audio/player";
+import {
+  addHistoryEntry,
+  getPlaybackHistory,
+  getSettings,
+  updatePlaybackProgress,
+  updateSettings,
+} from "@/lib/db";
 import { PLAYBACK_SPEEDS } from "@/lib/utils";
-import type { CurrentTrack } from "@/types";
+import { clearPlaybackState } from "@/lib/appwrite";
+import { trackPlayComplete, trackPlayStart } from "@/lib/analytics";
+import type { CurrentTrack, RepeatMode } from "@/types";
 
 interface PlayerContextValue {
   track: CurrentTrack | null;
   queue: CurrentTrack[];
   queueIndex: number;
+  repeatMode: RepeatMode;
   isPlaying: boolean;
   isBuffering: boolean;
   position: number;
@@ -28,6 +43,11 @@ interface PlayerContextValue {
   skipPrevious: () => Promise<void>;
   changeSpeed: () => Promise<void>;
   setSpeed: (speed: number) => Promise<void>;
+  setRepeatMode: (mode: RepeatMode) => void;
+  addToQueue: (track: CurrentTrack) => void;
+  removeFromQueue: (index: number) => void;
+  jumpToIndex: (index: number) => Promise<void>;
+  clearQueue: () => void;
   setSleepTimer: (minutes: number) => void;
   cancelSleepTimer: () => void;
   stop: () => Promise<void>;
@@ -42,6 +62,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [track, setTrack] = useState<CurrentTrack | null>(null);
   const [queue, setQueue] = useState<CurrentTrack[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
+  const [repeatMode, setRepeatModeState] = useState<RepeatMode>("off");
   const [rate, setRateState] = useState(1);
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState<number | null>(null);
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null);
@@ -52,10 +73,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       ? status.duration
       : track?.duration || 0;
 
+  const positionRef = useRef(position);
+  positionRef.current = position;
+  const durationRef = useRef(duration);
+  durationRef.current = duration;
+
   const queueRef = useRef<CurrentTrack[]>([]);
   queueRef.current = queue;
   const queueIndexRef = useRef(queueIndex);
   queueIndexRef.current = queueIndex;
+  const repeatModeRef = useRef<RepeatMode>("off");
+  repeatModeRef.current = repeatMode;
+  const restoredRef = useRef(false);
   const trackRef = useRef<CurrentTrack | null>(track);
   trackRef.current = track;
   const rateRef = useRef(rate);
@@ -74,43 +103,104 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           setRateState(settings.playbackSpeed);
           rateRef.current = settings.playbackSpeed;
         }
+        if (settings?.sleepTimerMinutes) {
+          setSleepTimerMinutes(settings.sleepTimerMinutes);
+          setSleepRemaining(settings.sleepTimerMinutes * 60);
+        }
+        try {
+          const saved = await loadQueueState();
+          if (saved && saved.queue.length > 0) {
+            const idx = Math.min(Math.max(0, saved.index), saved.queue.length - 1);
+            const restored = saved.queue[idx];
+            queueRef.current = saved.queue;
+            setQueue(saved.queue);
+            queueIndexRef.current = idx;
+            setQueueIndex(idx);
+            trackRef.current = restored;
+            setTrack(restored);
+            repeatModeRef.current = saved.repeat;
+            setRepeatModeState(saved.repeat);
+            // Resume offset comes from local history so it survives restarts.
+            if (restored.type === "episode") {
+              try {
+                const hist = await getPlaybackHistory(restored.id);
+                if (
+                  hist &&
+                  !hist.completed &&
+                  hist.position > 0 &&
+                  hist.duration > 0 &&
+                  hist.position < hist.duration
+                ) {
+                  pendingSeekRef.current = hist.position;
+                }
+              } catch {
+                // Best-effort resume offset; playback starts at 0 without it.
+              }
+            }
+          }
+        } catch {
+          // Corrupt queue state: start fresh.
+        }
+        restoredRef.current = true;
         setIsReady(true);
       })
-      .catch(() => setIsReady(true));
+      .catch(() => {
+        restoredRef.current = true;
+        setIsReady(true);
+      });
   }, []);
 
   const loadAndPlay = useCallback(
-    (next: CurrentTrack) => {
+    async (next: CurrentTrack) => {
       if (next.type === "radio") {
         player.setPlaybackRate(1);
       } else {
         player.setPlaybackRate(rateRef.current);
       }
-      player.replace(next.audioUrl);
-      player.setActiveForLockScreen(
-        true,
-        {
-          title: next.title,
-          artist: next.speaker,
-          artworkUrl: next.artworkUrl,
-        },
-        { isLiveStream: next.type === "radio" },
-      );
+      // Prefer the downloaded file when available (web parity).
+      const source = await resolveLocalAudio(next);
+      player.replace(source);
+      try {
+        // No-ops/fails in Expo Go (no playback service in its manifest).
+        player.setActiveForLockScreen(
+          true,
+          {
+            title: next.title,
+            artist: next.speaker,
+            artworkUrl: next.artworkUrl,
+          },
+          { isLiveStream: next.type === "radio" },
+        );
+      } catch {
+        // Lock-screen controls unavailable on this host; playback continues.
+      }
       player.play();
+      if (next.type === "episode" || next.type === "radio") {
+        trackPlayStart(next.id, next.type, next.title);
+      }
+      void persistCloudState(next, 0, rateRef.current);
     },
     [player],
   );
 
   const playIndex = useCallback(
-    async (index: number) => {
+    async (index: number, startPosition?: number) => {
       const q = queueRef.current;
       if (index < 0 || index >= q.length) return;
       const next = q[index];
+      const prevId = trackRef.current?.id;
       setQueueIndex(index);
+      queueIndexRef.current = index;
       setTrack(next);
       trackRef.current = next;
-      pendingSeekRef.current = null;
-      loadAndPlay(next);
+      // Keep a restored resume offset only when continuing the restored track.
+      if (pendingSeekRef.current != null && next.id !== prevId) {
+        pendingSeekRef.current = null;
+      }
+      if (startPosition != null && startPosition > 0) {
+        pendingSeekRef.current = startPosition;
+      }
+      await loadAndPlay(next);
     },
     [loadAndPlay],
   );
@@ -185,22 +275,52 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!status.didJustFinish) return;
-    if (!track || track.type === "radio") return;
-    const total = Math.floor(duration || track.duration || 0);
-    updatePlaybackProgress(track.id, total, total, true, {
-      title: track.title,
-      artworkUrl: track.artworkUrl,
-      audioUrl: track.audioUrl,
-      speaker: track.speaker,
-    }).catch(() => {});
-    if (queueIndexRef.current < queueRef.current.length - 1) {
-      playIndex(queueIndexRef.current + 1);
+    const finished = trackRef.current;
+    if (!finished || finished.type === "radio") return;
+    const total = Math.floor(durationRef.current || finished.duration || 0);
+    const meta = {
+      title: finished.title,
+      artworkUrl: finished.artworkUrl,
+      audioUrl: finished.audioUrl,
+      speaker: finished.speaker,
+    };
+    updatePlaybackProgress(finished.id, total, total, true, meta).catch(() => {});
+    if (finished.type === "episode") {
+      trackPlayComplete(finished.id, finished.type, finished.title, total);
     }
-  }, [status.didJustFinish, track, duration, playIndex]);
+    void persistCloudState(finished, total, rateRef.current);
+    const mode = repeatModeRef.current;
+    const idx = queueIndexRef.current;
+    if (mode === "one") {
+      // Replay the finished track.
+      void playIndex(idx, 0);
+    } else if (idx < queueRef.current.length - 1) {
+      void playIndex(idx + 1);
+    } else if (mode === "all" && queueRef.current.length > 0) {
+      // Wrap to the start of the queue.
+      void playIndex(0);
+    }
+    // mode === "off" at the end: stop at end — leave the player idle.
+  }, [status.didJustFinish, playIndex]);
 
   const togglePlay = useCallback(async () => {
+    const current = trackRef.current;
     if (isPlaying) {
+      const pos = Math.floor(positionRef.current);
       player.pause();
+      // Persist progress on pause (local history + best-effort cloud sync).
+      if (current && current.type !== "radio") {
+        const total = Math.floor(durationRef.current || current.duration || 0);
+        updatePlaybackProgress(current.id, pos, total, false, {
+          title: current.title,
+          artworkUrl: current.artworkUrl,
+          audioUrl: current.audioUrl,
+          speaker: current.speaker,
+        }).catch(() => {});
+      }
+      if (current) {
+        void persistCloudState(current, pos, rateRef.current);
+      }
     } else {
       player.play();
     }
@@ -223,15 +343,73 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const skipNext = useCallback(async () => {
-    await playIndex(queueIndexRef.current + 1);
+    const idx = queueIndexRef.current;
+    if (idx < queueRef.current.length - 1) {
+      await playIndex(idx + 1);
+    } else if (repeatModeRef.current === "all" && queueRef.current.length > 0) {
+      await playIndex(0);
+    }
   }, [playIndex]);
 
   const skipPrevious = useCallback(async () => {
     const prev = queueIndexRef.current - 1;
     if (prev >= 0) {
       await playIndex(prev);
+    } else if (repeatModeRef.current === "all" && queueRef.current.length > 0) {
+      await playIndex(queueRef.current.length - 1);
     }
   }, [playIndex]);
+
+  const setRepeatMode = useCallback((mode: RepeatMode) => {
+    setRepeatModeState(mode);
+    repeatModeRef.current = mode;
+  }, []);
+
+  const addToQueue = useCallback((nextTrack: CurrentTrack) => {
+    // Append without disturbing the current track/index.
+    const next = [...queueRef.current, nextTrack];
+    queueRef.current = next;
+    setQueue(next);
+  }, []);
+
+  const removeFromQueue = useCallback((index: number) => {
+    const q = queueRef.current;
+    if (index < 0 || index >= q.length) return;
+    const next = q.filter((_, i) => i !== index);
+    const ci = queueIndexRef.current;
+    let nextIndex = ci;
+    if (index < ci) {
+      nextIndex = ci - 1;
+    } else if (index === ci) {
+      nextIndex = next.length === 0 ? 0 : Math.min(ci, next.length - 1);
+    }
+    queueRef.current = next;
+    setQueue(next);
+    queueIndexRef.current = nextIndex;
+    setQueueIndex(nextIndex);
+    // The currently loaded audio is left untouched (web parity).
+  }, []);
+
+  const jumpToIndex = useCallback(
+    async (index: number) => {
+      await playIndex(index);
+    },
+    [playIndex],
+  );
+
+  const clearQueue = useCallback(() => {
+    // Empties the queue; current playback is left untouched.
+    queueRef.current = [];
+    setQueue([]);
+    queueIndexRef.current = 0;
+    setQueueIndex(0);
+  }, []);
+
+  // Persist queue + index + repeat (after the initial restore).
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    saveQueueState({ queue, index: queueIndex, repeat: repeatMode }).catch(() => {});
+  }, [queue, queueIndex, repeatMode]);
 
   const changeSpeed = useCallback(async () => {
     if (trackRef.current?.type === "radio") return;
@@ -260,6 +438,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     (minutes: number) => {
       setSleepTimerMinutes(minutes);
       setSleepRemaining(minutes * 60);
+      updateSettings({ sleepTimerMinutes: minutes }).catch(() => {});
     },
     [],
   );
@@ -267,6 +446,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const cancelSleepTimer = useCallback(() => {
     setSleepTimerMinutes(null);
     setSleepRemaining(null);
+    updateSettings({ sleepTimerMinutes: undefined }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -278,6 +458,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           clearInterval(interval);
           player.pause();
           setSleepTimerMinutes(null);
+          updateSettings({ sleepTimerMinutes: undefined }).catch(() => {});
           return null;
         }
         return prev - 1;
@@ -291,9 +472,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     player.setActiveForLockScreen(false);
     pendingSeekRef.current = null;
     setTrack(null);
+    trackRef.current = null;
     setQueue([]);
     setQueueIndex(0);
+    queueIndexRef.current = 0;
     queueRef.current = [];
+    clearPlaybackState().catch(() => {});
   }, [player]);
 
   const value = useMemo<PlayerContextValue>(
@@ -301,13 +485,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       track,
       queue,
       queueIndex,
+      repeatMode,
       isPlaying,
       isBuffering,
       position,
       duration,
       rate,
-      hasNext: queueIndex < queue.length - 1,
-      hasPrevious: queueIndex > 0,
+      hasNext: queue.length > 0 && (queueIndex < queue.length - 1 || repeatMode === "all"),
+      hasPrevious: queue.length > 0 && (queueIndex > 0 || repeatMode === "all"),
       isReady,
       sleepTimerMinutes,
       sleepRemaining,
@@ -319,6 +504,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       skipPrevious,
       changeSpeed,
       setSpeed,
+      setRepeatMode,
+      addToQueue,
+      removeFromQueue,
+      jumpToIndex,
+      clearQueue,
       setSleepTimer,
       cancelSleepTimer,
       stop,
@@ -327,6 +517,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       track,
       queue,
       queueIndex,
+      repeatMode,
       isPlaying,
       isBuffering,
       position,
@@ -343,6 +534,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       skipPrevious,
       changeSpeed,
       setSpeed,
+      setRepeatMode,
+      addToQueue,
+      removeFromQueue,
+      jumpToIndex,
+      clearQueue,
       setSleepTimer,
       cancelSleepTimer,
       stop,
