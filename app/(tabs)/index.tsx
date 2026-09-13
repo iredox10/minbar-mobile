@@ -120,7 +120,7 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      getInProgressHistory(6).then(setInProgress).catch(() => {});
+      getInProgressHistory(8).then(setInProgress).catch(() => {});
     }, []),
   );
 
@@ -281,7 +281,19 @@ export default function HomeScreen() {
                         )}
                         <View className="absolute inset-0 bg-slate-950/40" />
                         <View className="absolute bottom-1.5 right-1.5 h-8 w-8 items-center justify-center rounded-full bg-primary shadow-lg">
-                          <Play size={14} color="#0f172a" fill="#0f172a" />
+                          {isEpisodePlaying(item.episodeId) ? (
+                            <View className="flex-row items-end gap-0.5">
+                              {[14, 20, 11].map((h, i) => (
+                                <View
+                                  key={i}
+                                  className="w-1 rounded-full bg-slate-900"
+                                  style={{ height: h }}
+                                />
+                              ))}
+                            </View>
+                          ) : (
+                            <Play size={14} color="#0f172a" fill="#0f172a" />
+                          )}
                         </View>
                         <View className="absolute bottom-0 right-0 left-0 h-1 bg-black/40">
                           <View
