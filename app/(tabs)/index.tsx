@@ -367,7 +367,7 @@ export default function HomeScreen() {
           )}
 
           {/* Featured Speakers */}
-          <View className="mt-7">
+          <View className="mt-10">
             <SectionHeader
               title={t("featuredSpeakers")}
               onPress={() => router.push("/speakers")}
@@ -420,7 +420,7 @@ export default function HomeScreen() {
           </View>
 
           {/* Featured Series */}
-          <View className="mt-7">
+          <View className="mt-10">
             <SectionHeader
               title={t("featuredSeries")}
               onPress={() => router.push("/series")}
@@ -477,7 +477,7 @@ export default function HomeScreen() {
           </View>
 
           {/* New Episodes */}
-          <View className="mt-7">
+          <View className="mt-10">
             <SectionHeader
               title={t("latestEpisodes")}
               onPress={() => router.push("/latest")}
@@ -559,7 +559,7 @@ export default function HomeScreen() {
           {speakers.length === 0 && episodes.length === 0 && (
             <View className="py-16 text-center">
               <View className="mx-auto mb-6 h-24 w-24 items-center justify-center rounded-3xl bg-slate-800/50">
-                <User className="h-12 w-12 text-slate-600" />
+                <User size={48} color="#475569" />
               </View>
               <Text className="text-center text-lg text-slate-400">{t("noContent")}</Text>
               <Text className="mt-2 text-center text-sm text-slate-500">{t("addAppwrite")}</Text>
