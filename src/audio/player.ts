@@ -1,5 +1,7 @@
+import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { requestNotificationPermissionsAsync, setAudioModeAsync } from "expo-audio";
+import type { AudioPlayer } from "expo-audio";
 
 import { getDeviceId, savePlaybackState } from "@/lib/appwrite";
 import { getLocalUri } from "@/lib/downloads";
@@ -19,9 +21,77 @@ export async function setupPlayer(): Promise<void> {
     // Unsupported host (e.g. Expo Go): continue with foreground playback.
   }
   try {
-    await requestNotificationPermissionsAsync();
+    if (Platform.OS === "android") {
+      // Android 13+ needs POST_NOTIFICATIONS at runtime for the media
+      // notification. No-op / throws elsewhere — playback still works.
+      await requestNotificationPermissionsAsync();
+    }
   } catch {
     // Permission prompt may be unavailable on some platforms; playback still works.
+  }
+}
+
+/**
+ * Native (notification shade / lock screen / Control Center) presentation.
+ * expo-audio drives the OS MediaSession from this metadata: title, artist,
+ * album, artwork + seek buttons + live-stream mode (hides scrub bar).
+ */
+export function buildLockScreenMetadata(track: CurrentTrack) {
+  return {
+    title: track.title || "Arewa Central",
+    artist:
+      track.speaker ||
+      (track.type === "radio" ? "Live Radio" : track.type === "dua" ? "Dua" : "Arewa Central"),
+    albumTitle:
+      track.type === "radio"
+        ? "Live Radio • Arewa Central"
+        : track.type === "dua"
+          ? "Duas • Arewa Central"
+          : "Arewa Central",
+    artworkUrl: track.artworkUrl,
+  };
+}
+
+export function buildLockScreenOptions(track: CurrentTrack) {
+  const seekable = track.type !== "radio";
+  return {
+    // ±10s seek buttons in the notification / lock screen (episodes & duas).
+    showSeekForward: seekable,
+    showSeekBackward: seekable,
+    // Live radio: hides duration + scrub bar, disables seek.
+    isLiveStream: track.type === "radio",
+  };
+}
+
+/** Activate OS controls for a track (call on every load / queue advance). */
+export function setActiveTrackControls(player: AudioPlayer, track: CurrentTrack): void {
+  try {
+    // No-ops/fails in Expo Go (no playback service in its manifest).
+    player.setActiveForLockScreen(
+      true,
+      buildLockScreenMetadata(track),
+      buildLockScreenOptions(track),
+    );
+  } catch {
+    // Lock-screen controls unavailable on this host; playback continues.
+  }
+}
+
+/** Refresh artwork/title without re-activating (same active player). */
+export function refreshLockScreenMetadata(player: AudioPlayer, track: CurrentTrack): void {
+  try {
+    player.updateLockScreenMetadata(buildLockScreenMetadata(track));
+  } catch {
+    // Best-effort only.
+  }
+}
+
+/** Remove the app from the OS media controls (call on stop). */
+export function deactivateLockScreen(player: AudioPlayer): void {
+  try {
+    player.setActiveForLockScreen(false);
+  } catch {
+    // Best-effort only.
   }
 }
 

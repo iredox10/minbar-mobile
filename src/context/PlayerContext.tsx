@@ -2,10 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 
 import {
+  deactivateLockScreen,
   loadQueueState,
   persistCloudState,
   resolveLocalAudio,
   saveQueueState,
+  setActiveTrackControls,
   setupPlayer,
 } from "@/audio/player";
 import {
@@ -91,6 +93,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   rateRef.current = rate;
   const pendingSeekRef = useRef<number | null>(null);
   const lastLoadedRef = useRef(status.isLoaded);
+  const sleepDeadlineRef = useRef<number | null>(null);
 
   const isPlaying = status.playing;
   const isBuffering = status.isBuffering;
@@ -104,6 +107,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           rateRef.current = settings.playbackSpeed;
         }
         if (settings?.sleepTimerMinutes) {
+          sleepDeadlineRef.current = Date.now() + settings.sleepTimerMinutes * 60_000;
           setSleepTimerMinutes(settings.sleepTimerMinutes);
           setSleepRemaining(settings.sleepTimerMinutes * 60);
         }
@@ -160,20 +164,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       // Prefer the downloaded file when available (web parity).
       const source = await resolveLocalAudio(next);
       player.replace(source);
-      try {
-        // No-ops/fails in Expo Go (no playback service in its manifest).
-        player.setActiveForLockScreen(
-          true,
-          {
-            title: next.title,
-            artist: next.speaker,
-            artworkUrl: next.artworkUrl,
-          },
-          { isLiveStream: next.type === "radio" },
-        );
-      } catch {
-        // Lock-screen controls unavailable on this host; playback continues.
-      }
+      // Native notification shade / lock screen / Control Center + headset
+      // controls. OS play/pause/seek buttons drive this same player, so the
+      // in-app UI (status.playing) stays in sync with remote presses.
+      // Required on Android for sustained background playback (foreground
+      // service media notification); on iOS it feeds Now Playing.
+      setActiveTrackControls(player, next);
       player.play();
       if (next.type === "episode" || next.type === "radio") {
         trackPlayStart(next.id, next.type, next.title);
@@ -256,6 +252,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const lastSaveRef = useRef(0);
 
   useEffect(() => {
+    // Backup sleep-timer check on every status tick (covers throttled intervals).
+    const deadline = sleepDeadlineRef.current;
+    if (deadline != null && Date.now() >= deadline) {
+      sleepDeadlineRef.current = null;
+      player.pause();
+      setSleepTimerMinutes(null);
+      setSleepRemaining(null);
+      updateSettings({ sleepTimerMinutes: undefined }).catch(() => {});
+      return;
+    }
     if (!track || track.type === "radio" || !isPlaying) return;
     if (Date.now() - lastSaveRef.current < 10000) return;
     lastSaveRef.current = Date.now();
@@ -434,16 +440,42 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [player],
   );
 
-  const setSleepTimer = useCallback(
-    (minutes: number) => {
-      setSleepTimerMinutes(minutes);
-      setSleepRemaining(minutes * 60);
-      updateSettings({ sleepTimerMinutes: minutes }).catch(() => {});
-    },
-    [],
-  );
+  // Persist progress when playback pauses from ANY source — in-app button,
+  // notification / lock-screen pause, headset disconnect, audio interruption.
+  // (OS remote presses drive the shared player directly, bypassing togglePlay.)
+  const wasPlayingRef = useRef(false);
+  useEffect(() => {
+    const wasPlaying = wasPlayingRef.current;
+    wasPlayingRef.current = isPlaying;
+    if (wasPlaying && !isPlaying) {
+      const current = trackRef.current;
+      if (current && current.type !== "radio") {
+        const pos = Math.floor(positionRef.current);
+        const total = Math.floor(durationRef.current || current.duration || 0);
+        updatePlaybackProgress(current.id, pos, total, false, {
+          title: current.title,
+          artworkUrl: current.artworkUrl,
+          audioUrl: current.audioUrl,
+          speaker: current.speaker,
+        }).catch(() => {});
+        void persistCloudState(current, pos, rateRef.current);
+      }
+    }
+  }, [isPlaying]);
+
+  // Sleep timer as a wall-clock deadline (not a tick counter) so it still
+  // fires if the JS timer is throttled while backgrounded. The 1s interval
+  // keeps the in-app countdown fresh; the position-saver effect below acts
+  // as a backup check on every playback-status update.
+  const setSleepTimer = useCallback((minutes: number) => {
+    sleepDeadlineRef.current = Date.now() + minutes * 60_000;
+    setSleepTimerMinutes(minutes);
+    setSleepRemaining(minutes * 60);
+    updateSettings({ sleepTimerMinutes: minutes }).catch(() => {});
+  }, []);
 
   const cancelSleepTimer = useCallback(() => {
+    sleepDeadlineRef.current = null;
     setSleepTimerMinutes(null);
     setSleepRemaining(null);
     updateSettings({ sleepTimerMinutes: undefined }).catch(() => {});
@@ -451,25 +483,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (sleepTimerMinutes === null) return;
+    const fireSleepTimer = () => {
+      sleepDeadlineRef.current = null;
+      player.pause();
+      setSleepTimerMinutes(null);
+      setSleepRemaining(null);
+      updateSettings({ sleepTimerMinutes: undefined }).catch(() => {});
+    };
     const interval = setInterval(() => {
-      setSleepRemaining((prev) => {
-        if (prev === null) return null;
-        if (prev <= 1) {
-          clearInterval(interval);
-          player.pause();
-          setSleepTimerMinutes(null);
-          updateSettings({ sleepTimerMinutes: undefined }).catch(() => {});
-          return null;
-        }
-        return prev - 1;
-      });
+      const deadline = sleepDeadlineRef.current;
+      if (deadline == null) return;
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      if (remaining <= 0) {
+        clearInterval(interval);
+        fireSleepTimer();
+      } else {
+        setSleepRemaining(remaining);
+      }
     }, 1000);
     return () => clearInterval(interval);
   }, [sleepTimerMinutes, player]);
 
   const stop = useCallback(async () => {
     player.pause();
-    player.setActiveForLockScreen(false);
+    deactivateLockScreen(player);
     pendingSeekRef.current = null;
     setTrack(null);
     trackRef.current = null;
