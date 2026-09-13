@@ -202,12 +202,12 @@ export default function HomeScreen() {
         <View className="absolute right-0 top-0 h-40 w-40 rounded-full bg-primary/10" />
         <View className="absolute bottom-8 left-0 h-28 w-28 rounded-full bg-violet-500/10" />
 
-        <View className="relative px-4 pb-7 pt-4">
+        <View className="relative px-4 pb-12 pt-8">
           {donationsEnabled && (
             <View className="mb-4 flex-row justify-end">
               <Pressable
                 onPress={() => router.push("/donate")}
-                className="flex-row items-center gap-1.5 rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1.5 active:bg-rose-500/20"
+                className="flex-row items-center gap-2 rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1.5 active:bg-rose-500/20"
               >
                 <Heart size={14} color="#fb7185" fill="#fb7185" style={{ opacity: 0.5 }} />
                 <Text className="text-xs font-semibold tracking-wide text-rose-400">
@@ -217,7 +217,7 @@ export default function HomeScreen() {
             </View>
           )}
 
-          <View className="mb-7 flex-row items-center justify-center gap-3">
+          <View className="mb-2 flex-row items-center justify-center gap-3">
             <Image
               source={require("../../assets/images/logo.png")}
               className="h-12 w-12 rounded-2xl"
@@ -228,17 +228,17 @@ export default function HomeScreen() {
               <Text className="text-primary">Central</Text>
             </Text>
           </View>
-          <Text className="mb-7 text-center text-base text-slate-500 dark:text-slate-400">
+          <Text className="mb-8 text-center text-lg text-slate-500 dark:text-slate-400">
             {t("discoverKnowledge")}
           </Text>
 
           {/* Search entry */}
           <Pressable
             onPress={() => router.push("/search")}
-            className="flex-row items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 dark:border-slate-700/50 dark:bg-slate-800/60"
+            className="flex-row items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 dark:border-slate-700/50 dark:bg-slate-900/80"
           >
-            <Search size={18} color="#94a3b8" />
-            <Text className="flex-1 text-[15px] text-slate-400">{t("searchPlaceholder")}</Text>
+            <Search size={20} color="#64748b" />
+            <Text className="flex-1 text-[15px] text-slate-500">{t("searchPlaceholder")}</Text>
           </Pressable>
         </View>
       </View>
