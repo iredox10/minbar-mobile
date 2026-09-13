@@ -1,40 +1,65 @@
-import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { requestNotificationPermissionsAsync, setAudioModeAsync } from "expo-audio";
-import type { AudioPlayer } from "expo-audio";
+import TrackPlayer, { PlayerCommand } from "@rntp/player";
+import type { MediaItem } from "@rntp/player";
 
 import { getDeviceId, savePlaybackState } from "@/lib/appwrite";
 import { getLocalUri } from "@/lib/downloads";
 import type { CurrentTrack, RepeatMode } from "@/types";
 
+export { albumTitleForType, mediaItemToTrack, toMediaItem } from "./tracks";
+export type { AudioTrackType } from "./tracks";
+
+let didSetup = false;
+
+/**
+ * One-time @rntp/player setup (speech content, Arewa playback channel,
+ * OS remote-command capabilities). Safe to call repeatedly — later calls
+ * are ignored. Throws a friendly Error only on hard setup failure so the
+ * engine can surface audioError.
+ */
 export async function setupPlayer(): Promise<void> {
+  if (didSetup) return;
   try {
-    // Throws in Expo Go (no playback service in its manifest — the
-    // enableBackgroundPlayback plugin only applies to dev/prod builds).
-    // Foreground playback still works; background/lock-screen won't.
-    await setAudioModeAsync({
-      playsInSilentMode: true,
-      shouldPlayInBackground: true,
-      interruptionMode: "doNotMix",
+    TrackPlayer.setupPlayer({
+      contentType: "speech",
+      android: {
+        // NOTE: smallIcon is typed as required but is nullable/optional in
+        // the native Kotlin config — omitted here via cast (no custom icon
+        // resource shipped yet).
+        notification: {
+          channelId: "arewa-playback",
+          channelName: "Arewa Central Playback",
+        } as { channelId: string; channelName: string; smallIcon: string },
+      },
     });
   } catch {
-    // Unsupported host (e.g. Expo Go): continue with foreground playback.
+    throw new Error(
+      "Audio player failed to start. Please restart the app and try again.",
+    );
   }
   try {
-    if (Platform.OS === "android") {
-      // Android 13+ needs POST_NOTIFICATIONS at runtime for the media
-      // notification. No-op / throws elsewhere — playback still works.
-      await requestNotificationPermissionsAsync();
-    }
+    TrackPlayer.setCommands({
+      capabilities: [
+        PlayerCommand.PlayPause,
+        PlayerCommand.Next,
+        PlayerCommand.Previous,
+        PlayerCommand.Stop,
+        PlayerCommand.Seek,
+        PlayerCommand.SkipForward,
+        PlayerCommand.SkipBackward,
+      ],
+      forwardInterval: 30,
+      backwardInterval: 15,
+    });
   } catch {
-    // Permission prompt may be unavailable on some platforms; playback still works.
+    // Remote-command config is best-effort; playback works without it.
   }
+  didSetup = true;
 }
 
 /**
  * Native (notification shade / lock screen / Control Center) presentation.
- * expo-audio drives the OS MediaSession from this metadata: title, artist,
- * album, artwork + seek buttons + live-stream mode (hides scrub bar).
+ * Pure helper — kept for engine reuse; the native session owns OS controls.
  */
 export function buildLockScreenMetadata(track: CurrentTrack) {
   return {
@@ -63,37 +88,30 @@ export function buildLockScreenOptions(track: CurrentTrack) {
   };
 }
 
-/** Activate OS controls for a track (call on every load / queue advance). */
-export function setActiveTrackControls(player: AudioPlayer, track: CurrentTrack): void {
-  try {
-    // No-ops/fails in Expo Go (no playback service in its manifest).
-    player.setActiveForLockScreen(
-      true,
-      buildLockScreenMetadata(track),
-      buildLockScreenOptions(track),
-    );
-  } catch {
-    // Lock-screen controls unavailable on this host; playback continues.
-  }
+/**
+ * No-ops kept for engine compatibility. The native @rntp/player session owns
+ * OS controls now — no per-player activation needed. Accepts either the old
+ * (player, track) shape or a bare track.
+ */
+export function setActiveTrackControls(_playerOrTrack?: unknown, _track?: CurrentTrack): void {
+  // Intentionally empty.
 }
 
-/** Refresh artwork/title without re-activating (same active player). */
-export function refreshLockScreenMetadata(player: AudioPlayer, track: CurrentTrack): void {
-  try {
-    player.updateLockScreenMetadata(buildLockScreenMetadata(track));
-  } catch {
-    // Best-effort only.
-  }
+/** No-op kept for engine compatibility (see above). */
+export function refreshLockScreenMetadata(
+  _playerOrTrack?: unknown,
+  _track?: CurrentTrack,
+): void {
+  // Intentionally empty.
 }
 
-/** Remove the app from the OS media controls (call on stop). */
-export function deactivateLockScreen(player: AudioPlayer): void {
-  try {
-    player.setActiveForLockScreen(false);
-  } catch {
-    // Best-effort only.
-  }
+/** No-op kept for engine compatibility (see above). */
+export function deactivateLockScreen(_playerOrTrack?: unknown): void {
+  // Intentionally empty.
 }
+
+// Re-export the MediaItem type for engine convenience.
+export type { MediaItem };
 
 /**
  * Prefer an on-device file when the episode was downloaded (web parity with
@@ -127,7 +145,7 @@ export async function persistCloudState(
   }
 }
 
-const QUEUE_STORAGE_KEY = "arewa-db:player-queue";
+export const QUEUE_STORAGE_KEY = "arewa-db:player-queue";
 
 export interface PersistedQueueState {
   queue: CurrentTrack[];
