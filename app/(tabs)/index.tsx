@@ -45,8 +45,16 @@ import type { Episode, PlaybackHistory } from "@/types";
 
 function SectionLoading() {
   return (
-    <View className="h-36 items-center justify-center rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-800/40">
-      <ActivityIndicator color="#d4a853" />
+    <View className="mt-1 opacity-90">
+      <View className="mb-4 h-5 w-40 rounded-md bg-slate-200 dark:bg-slate-800" />
+      <View className="flex-row gap-5 px-1">
+        {[0, 1, 2, 3].map((i) => (
+          <View key={i} className="items-center">
+            <View className="h-24 w-24 rounded-full bg-slate-200 dark:bg-slate-800" />
+            <View className="mt-2.5 h-3 w-16 rounded-md bg-slate-200 dark:bg-slate-800" />
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
