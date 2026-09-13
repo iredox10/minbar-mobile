@@ -236,8 +236,8 @@ export default function HomeScreen() {
       </View>
 
       {!configured ? (
-        <View className="mt-6">
-          <EmptyState title={t("configureAppwrite")} icon={Search} />
+        <View className="mt-6 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+          <Text className="text-sm text-amber-400">{t("configureAppwrite")}</Text>
         </View>
       ) : featuredSpeakers.loading ? (
         <View className="mt-6">
