@@ -113,7 +113,8 @@ export default function HomeScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { playTrackImmediately, seek } = usePlayer();
+  const { playTrackImmediately, playEpisode, togglePlay, seek, track: currentTrack, isPlaying } =
+    usePlayer();
   const [inProgress, setInProgress] = useState<PlaybackHistory[]>([]);
   const [donationsEnabled, setDonationsEnabled] = useState(false);
 
@@ -143,6 +144,26 @@ export default function HomeScreen() {
 
   const cardGap = 12;
   const cardWidth = (width - 32 - cardGap) / 2;
+
+  const isEpisodePlaying = (episodeId: string) =>
+    currentTrack?.id === episodeId && isPlaying;
+
+  /** Inline play like web's handlePlayEpisode — same track toggles, else loads. */
+  const handlePlayEpisode = (episode: Episode) => {
+    if (currentTrack?.id === episode.$id) {
+      togglePlay().catch(() => {});
+      return;
+    }
+    playEpisode({
+      id: episode.$id,
+      title: episode.title,
+      audioUrl: episode.audioUrl,
+      duration: episode.duration,
+      type: "episode",
+      seriesId: episode.seriesId,
+      episodeNumber: episode.episodeNumber,
+    }).catch(() => {});
+  };
 
   const resume = (item: PlaybackHistory) => {
     if (!item.audioUrl) {
@@ -353,7 +374,6 @@ export default function HomeScreen() {
             {featuredSeries.error ? (
               <EmptyState title={t("noContentAvailableYet")} />
             ) : (
-              {/* 2-col grid like web (grid-cols-2) — must wrap */}
               <View className="flex-row flex-wrap gap-3">
                 {series.slice(0, 6).map((item, index) => (
                   <Pressable
@@ -412,17 +432,43 @@ export default function HomeScreen() {
               <EmptyState title={t("noContentAvailableYet")} />
             ) : (
               <View className="gap-2.5">
-                {episodes.slice(0, 5).map((episode) => (
-                  <Pressable
-                    key={episode.$id}
-                    onPress={() =>
-                      router.push({ pathname: "/episodes/[id]", params: { id: episode.$id } })
-                    }
-                    className="flex-row items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 active:opacity-80 dark:border-slate-800 dark:bg-slate-800/40"
-                  >
-                    <View className="h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-slate-800/40">
-                        <Play size={20} color="#94a3b8" />
-                      </View>
+                {episodes.slice(0, 5).map((episode) => {
+                  const active = isEpisodePlaying(episode.$id);
+                  return (
+                    <Pressable
+                      key={episode.$id}
+                      onPress={() =>
+                        router.push({ pathname: "/episodes/[id]", params: { id: episode.$id } })
+                      }
+                      className={
+                        active
+                          ? "flex-row items-center gap-3 rounded-2xl border border-primary bg-primary/5 p-3 active:opacity-80"
+                          : "flex-row items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 active:opacity-80 dark:border-slate-800 dark:bg-slate-800/40"
+                      }
+                    >
+                      <Pressable
+                        onPress={() => handlePlayEpisode(episode)}
+                        hitSlop={4}
+                        className={
+                          active
+                            ? "h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-primary"
+                            : "h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-slate-200 dark:bg-slate-800"
+                        }
+                      >
+                        {active ? (
+                          <View className="flex-row items-end gap-0.5">
+                            {[14, 20, 11].map((h, i) => (
+                              <View
+                                key={i}
+                                className="w-1 rounded-full bg-slate-900"
+                                style={{ height: h }}
+                              />
+                            ))}
+                          </View>
+                        ) : (
+                          <Play size={20} color="#94a3b8" fill="#94a3b8" />
+                        )}
+                      </Pressable>
                     <View className="flex-1">
                       <Text
                         numberOfLines={2}
@@ -444,8 +490,9 @@ export default function HomeScreen() {
                       </View>
                     </View>
                     <EpisodeActions episode={episode} />
-                  </Pressable>
-                ))}
+                    </Pressable>
+                  );
+                })}
               </View>
             )}
           </View>
