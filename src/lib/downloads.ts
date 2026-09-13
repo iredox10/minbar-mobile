@@ -161,3 +161,177 @@ export async function listDownloads(): Promise<DownloadedEpisode[]> {
   }
   return valid;
 }
+
+export async function getStorageUsage(): Promise<{ count: number; bytes: number }> {
+  const all = await getDownloads();
+  return {
+    count: all.length,
+    bytes: all.reduce((sum, d) => sum + (d.fileSize ?? 0), 0),
+  };
+}
+
+export async function clearAllDownloads(): Promise<void> {
+  for (const task of activeTasks.values()) {
+    try {
+      task.cancel();
+    } catch {
+      // ignore cancel errors for tasks that already settled
+    }
+  }
+  activeTasks.clear();
+  progressMap.clear();
+  const dir = downloadsDirectory();
+  const all = await getDownloads();
+  for (const d of all) {
+    const file = new File(dir, fileNameFor(d.episodeId));
+    try {
+      if (file.exists) file.delete();
+    } catch {
+      // file may already be gone; db record is still removed below
+    }
+    if (d.id != null) {
+      try {
+        await removeDownload(d.id);
+      } catch {
+        // keep clearing the rest even if one record fails
+      }
+    }
+  }
+  notify();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isGateError(err: unknown): boolean {
+  const code = (err as Error & { code?: string })?.code;
+  return code === "DOWNLOAD_WIFI" || code === "DOWNLOAD_OFFLINE";
+}
+
+function gateError(reason: "wifi" | "offline"): Error {
+  const err = new Error(reason) as Error & { code?: string };
+  err.code = `DOWNLOAD_${reason.toUpperCase()}`;
+  return err;
+}
+
+export interface DownloadSeriesProgress {
+  current: number;
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  currentEpisodeId?: string;
+}
+
+export interface DownloadSeriesResult extends DownloadSeriesProgress {
+  failedIds: string[];
+}
+
+export type DownloadSeriesProgressCallback = (progress: DownloadSeriesProgress) => void;
+
+export interface DownloadSeriesOptions {
+  meta?: Partial<DownloadMeta>;
+  metaFor?: (episode: Episode) => Partial<DownloadMeta> | undefined;
+  onProgress?: DownloadSeriesProgressCallback;
+  /** Attempts per episode including the first try. Default 3 (initial + 2 retries). */
+  maxAttempts?: number;
+}
+
+const DOWNLOAD_SERIES_DEFAULT_ATTEMPTS = 3;
+const DOWNLOAD_SERIES_RETRY_DELAY_MS = 750;
+
+/**
+ * downloadSeries — sequential "Download All" queue (mobile parity for web
+ * `useDownloads` processQueue). Episodes download one at a time in order,
+ * already-downloaded episodes are skipped, and each episode is retried up to
+ * 2 extra times on transient failure. Wifi/offline gates from
+ * `downloadEpisode` are kept: a gate failure aborts the remaining queue.
+ */
+export async function downloadSeries(
+  episodes: Episode[],
+  opts?: DownloadSeriesOptions,
+): Promise<DownloadSeriesResult> {
+  const maxAttempts = Math.max(1, opts?.maxAttempts ?? DOWNLOAD_SERIES_DEFAULT_ATTEMPTS);
+  const total = episodes.length;
+  const result: DownloadSeriesResult = {
+    current: 0,
+    total,
+    completed: 0,
+    failed: 0,
+    skipped: 0,
+    failedIds: [],
+  };
+  const emit = (currentEpisodeId?: string): void => {
+    opts?.onProgress?.({ ...result, currentEpisodeId });
+  };
+
+  // Fail fast before emitting progress so callers can surface wifi/offline UI.
+  const gate = await canDownloadNow();
+  if (!gate.ok && total > 0) {
+    throw gateError(gate.reason ?? "offline");
+  }
+
+  for (let i = 0; i < episodes.length; i++) {
+    const episode = episodes[i];
+    result.current = i + 1;
+    emit(episode.$id);
+
+    if (await isDownloaded(episode.$id)) {
+      result.skipped += 1;
+      result.completed += 1;
+      emit(episode.$id);
+      continue;
+    }
+
+    let ok = false;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await downloadEpisode(episode, opts?.metaFor?.(episode) ?? opts?.meta);
+        ok = true;
+        break;
+      } catch (err) {
+        if (isGateError(err)) throw err;
+        if (attempt < maxAttempts) await sleep(DOWNLOAD_SERIES_RETRY_DELAY_MS * attempt);
+      }
+    }
+    if (ok) {
+      result.completed += 1;
+    } else {
+      result.failed += 1;
+      result.failedIds.push(episode.$id);
+    }
+    emit(episode.$id);
+  }
+  return result;
+}
+
+/**
+ * checkAutoDownload — stub entry point for auto-download.
+ *
+ * Intended usage (main agent): after fetching the latest episodes feed, call
+ * `const candidates = await checkAutoDownload(latest)` and then, if
+ * non-empty, `await downloadSeries(candidates, { onProgress })`.
+ *
+ * Current behavior: returns the episodes eligible for auto-download — the
+ * `autoDownload` setting is ON, the device passes the wifi/offline gates,
+ * and the episode has an audioUrl and is not already downloaded (or
+ * downloading). Returns [] otherwise.
+ *
+ * Deliberately NOT wired to any background worker/scheduler here; scheduling
+ * (background fetch/task) is left to the main agent.
+ */
+export async function checkAutoDownload(latest: Episode[]): Promise<Episode[]> {
+  const settings = await getSettings();
+  if (!settings?.autoDownload) return [];
+  const gate = await canDownloadNow();
+  if (!gate.ok) return [];
+  const candidates: Episode[] = [];
+  for (const episode of latest) {
+    if (!episode?.audioUrl) continue;
+    if (isDownloading(episode.$id)) continue;
+    if (await isDownloaded(episode.$id)) continue;
+    candidates.push(episode);
+  }
+  return candidates;
+}
