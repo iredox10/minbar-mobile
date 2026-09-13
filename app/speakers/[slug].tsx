@@ -1,6 +1,6 @@
-import { ActivityIndicator, Text, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
-import { Mic } from "lucide-react-native";
+import { ActivityIndicator, Pressable, Share, Text, View } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { Mic, Play, Share2, UserCheck, UserPlus } from "lucide-react-native";
 
 import { Screen } from "@/components/Screen";
 import { BackHeader } from "@/components/ui/BackHeader";
@@ -9,6 +9,8 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { SeriesCard } from "@/components/ui/SeriesCard";
 import { EpisodeRow } from "@/components/ui/EpisodeRow";
 import { Artwork } from "@/components/Artwork";
+import { usePlayer } from "@/context/PlayerContext";
+import { useUser } from "@/context/UserContext";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
@@ -16,13 +18,19 @@ import {
   getSeriesBySpeaker,
   getStandaloneEpisodesBySpeaker,
 } from "@/lib/appwrite";
+import type { CurrentTrack } from "@/types";
 
 export default function SpeakerDetailScreen() {
   const { t } = useTranslation();
+  const router = useRouter();
   const { slug } = useLocalSearchParams<{ slug: string }>();
+  const slugParam = Array.isArray(slug) ? slug[0] ?? "" : slug ?? "";
+  const { following, toggleFollow } = useUser();
+  const { playEpisode } = usePlayer();
 
-  const speaker = useAsyncData(() => getSpeakerBySlug(slug ?? ""), [slug]);
+  const speaker = useAsyncData(() => getSpeakerBySlug(slugParam), [slugParam]);
   const speakerId = speaker.data?.$id ?? "";
+  const isFollowing = speakerId ? following.includes(speakerId) : false;
 
   const series = useAsyncData(
     () => (speakerId ? getSeriesBySpeaker(speakerId) : Promise.resolve([])),
@@ -35,9 +43,49 @@ export default function SpeakerDetailScreen() {
 
   const loading = speaker.loading || series.loading || standalone.loading;
 
+  const handleShare = () => {
+    if (!speaker.data) return;
+    Share.share({
+      title: speaker.data.name,
+      message: `Listen to "${speaker.data.name}" on Arewa Central\narewa://speakers/${slugParam}`,
+    }).catch(() => {});
+  };
+
+  const handlePlayAll = () => {
+    const episodes = standalone.data;
+    if (!episodes || episodes.length === 0) return;
+    const queue: CurrentTrack[] = episodes.map((ep) => ({
+      id: ep.$id,
+      title: ep.title,
+      audioUrl: ep.audioUrl,
+      artworkUrl: speaker.data?.imageUrl,
+      speaker: speaker.data?.name,
+      duration: ep.duration,
+      type: "episode",
+      seriesId: ep.seriesId,
+      episodeNumber: ep.episodeNumber,
+    }));
+    playEpisode(queue[0], queue).catch(() => {});
+    router.push("/player");
+  };
+
   return (
     <Screen>
-      <BackHeader title={speaker.data?.name ?? t("speakers")} />
+      <BackHeader
+        title={speaker.data?.name ?? t("speakers")}
+        right={
+          speaker.data ? (
+            <Pressable
+              onPress={handleShare}
+              hitSlop={8}
+              accessibilityLabel={t("share")}
+              className="h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-800/40"
+            >
+              <Share2 size={16} color="#94a3b8" />
+            </Pressable>
+          ) : undefined
+        }
+      />
 
       {loading ? (
         <View className="py-16 items-center">
@@ -58,6 +106,31 @@ export default function SpeakerDetailScreen() {
                   {speaker.data.bio}
                 </Text>
               ) : null}
+              <Pressable
+                onPress={() => {
+                  if (speakerId) toggleFollow(speakerId).catch(() => {});
+                }}
+                className={
+                  isFollowing
+                    ? "mt-3 flex-row items-center gap-1.5 self-start rounded-full border border-primary/30 bg-slate-800 px-3 py-1.5"
+                    : "mt-3 flex-row items-center gap-1.5 self-start rounded-full bg-primary px-3 py-1.5"
+                }
+              >
+                {isFollowing ? (
+                  <UserCheck size={14} color="#d4a853" />
+                ) : (
+                  <UserPlus size={14} color="#0f172a" />
+                )}
+                <Text
+                  className={
+                    isFollowing
+                      ? "text-xs font-semibold text-primary"
+                      : "text-xs font-semibold text-slate-900"
+                  }
+                >
+                  {isFollowing ? t("following") : t("follow")}
+                </Text>
+              </Pressable>
             </View>
           </View>
 
@@ -76,7 +149,18 @@ export default function SpeakerDetailScreen() {
 
           {(standalone.data?.length ?? 0) > 0 ? (
             <View className="mb-4">
-              <SectionHeader title={t("latestEpisodes")} />
+              <SectionHeader
+                title={t("latestEpisodes")}
+                rightSlot={
+                  <Pressable
+                    onPress={handlePlayAll}
+                    className="flex-row items-center gap-1.5 rounded-full bg-primary px-3.5 py-2"
+                  >
+                    <Play size={14} color="#0f172a" fill="#0f172a" />
+                    <Text className="text-xs font-bold text-slate-900">{t("playAll")}</Text>
+                  </Pressable>
+                }
+              />
               <View className="gap-2.5">
                 {standalone.data!.map((episode) => (
                   <EpisodeRow

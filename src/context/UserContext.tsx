@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import * as Linking from "expo-linking";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { OAuthProvider } from "appwrite";
 
 import { account, isAppwriteConfigured } from "@/lib/appwrite";
@@ -16,11 +17,14 @@ import type { User } from "@/types";
 interface UserContextValue {
   user: User | null;
   loading: boolean;
+  following: string[];
   login: (provider: OAuthProvider) => Promise<void>;
   logout: () => Promise<void>;
   updateLanguage: (lang: "en" | "ha") => Promise<void>;
   toggleFollow: (speakerId: string) => Promise<void>;
 }
+
+const FOLLOWING_KEY = "arewa-following";
 
 const UserContext = createContext<UserContextValue | null>(null);
 
@@ -33,7 +37,24 @@ export function useUser(): UserContextValue {
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [following, setFollowing] = useState<string[]>([]);
   const linkingSubRef = useRef<{ remove: () => void } | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem(FOLLOWING_KEY)
+      .then((raw) => {
+        if (!raw) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setFollowing(parsed.filter((id): id is string => typeof id === "string"));
+          }
+        } catch {
+          // Corrupt cache: ignore and start fresh.
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const checkUser = useCallback(async () => {
     if (!isAppwriteConfigured()) {
@@ -45,6 +66,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
       const session = await account.get();
       const prefs = await account.getPrefs();
       setUser({ ...session, prefs } as User);
+      const serverFollowing = (prefs as { following?: unknown } | undefined)?.following;
+      if (Array.isArray(serverFollowing)) {
+        const ids = serverFollowing.filter((id): id is string => typeof id === "string");
+        setFollowing((prev) => Array.from(new Set([...prev, ...ids])));
+      }
     } catch {
       setUser(null);
     } finally {
@@ -134,13 +160,27 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   const toggleFollow = useCallback(
     async (speakerId: string) => {
+      const prev = await AsyncStorage.getItem(FOLLOWING_KEY).catch(() => null);
+      let current: string[] = following;
+      if (prev) {
+        try {
+          const parsed = JSON.parse(prev);
+          if (Array.isArray(parsed)) {
+            current = parsed.filter((id): id is string => typeof id === "string");
+          }
+        } catch {
+          // Fall back to in-memory state on corrupt cache.
+        }
+      }
+      const newFollowing = current.includes(speakerId)
+        ? current.filter((id) => id !== speakerId)
+        : [...current, speakerId];
+
+      setFollowing(newFollowing);
+      AsyncStorage.setItem(FOLLOWING_KEY, JSON.stringify(newFollowing)).catch(() => {});
+
       if (!user) return;
       try {
-        const following = user.prefs?.following || [];
-        const newFollowing = following.includes(speakerId)
-          ? following.filter((id) => id !== speakerId)
-          : [...following, speakerId];
-
         const newPrefs = { ...user.prefs, following: newFollowing };
         await account.updatePrefs(newPrefs);
         setUser({ ...user, prefs: newPrefs });
@@ -148,12 +188,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
         console.error("Failed to update following:", error);
       }
     },
-    [user],
+    [following, user],
   );
 
   return (
     <UserContext.Provider
-      value={{ user, loading, login, logout, updateLanguage, toggleFollow }}
+      value={{ user, loading, following, login, logout, updateLanguage, toggleFollow }}
     >
       {children}
     </UserContext.Provider>
