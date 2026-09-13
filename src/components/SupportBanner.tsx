@@ -7,12 +7,13 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { getAppSettings } from "@/lib/appwrite";
 
 /** Emerald gradient-style support CTA shown when donations are enabled. */
-export function SupportBanner() {
+export function SupportBanner({ enabled: enabledProp }: { enabled?: boolean }) {
   const { t } = useTranslation();
   const router = useRouter();
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [enabled, setEnabled] = useState<boolean | null>(enabledProp ?? null);
 
   useEffect(() => {
+    if (enabledProp !== undefined) { setEnabled(enabledProp); return; }
     let active = true;
     getAppSettings()
       .then((settings) => {
@@ -24,7 +25,7 @@ export function SupportBanner() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [enabledProp]);
 
   if (enabled === null || !enabled) return null;
 

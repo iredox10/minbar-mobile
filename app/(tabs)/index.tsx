@@ -553,7 +553,7 @@ export default function HomeScreen() {
           </View>
 
           {/* Support Banner */}
-          <SupportBanner />
+          <SupportBanner enabled={donationsEnabled} />
 
           {/* Empty State */}
           {speakers.length === 0 && episodes.length === 0 && (
