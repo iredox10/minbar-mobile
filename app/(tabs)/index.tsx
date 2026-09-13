@@ -409,7 +409,7 @@ export default function HomeScreen() {
                     </View>
                     <Text
                       numberOfLines={1}
-                      className="mt-2.5 w-24 text-center text-sm font-medium text-slate-900 dark:text-slate-100"
+                      className="mt-3 w-24 text-center text-sm font-medium text-slate-900 dark:text-slate-100"
                     >
                       {speaker.name}
                     </Text>
