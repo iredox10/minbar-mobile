@@ -390,7 +390,7 @@ export default function HomeScreen() {
                     className="items-center active:opacity-80"
                   >
                     <View className="relative">
-                      <View className="h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-slate-800/40 ring-2 ring-slate-300 dark:ring-slate-700">
+                      <View className="h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-slate-800/40 border-2 border-slate-300 dark:border-slate-700">
                         {speaker.imageUrl ? (
                           <Image
                             source={{ uri: speaker.imageUrl }}
