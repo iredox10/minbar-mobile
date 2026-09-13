@@ -72,6 +72,9 @@ export default function PlayerScreen() {
     position,
     duration,
     rate,
+    volume,
+    isMuted,
+    audioError,
     hasNext,
     hasPrevious,
     playTrackImmediately,
@@ -80,6 +83,8 @@ export default function PlayerScreen() {
     skipNext,
     skipPrevious,
     changeSpeed,
+    setVolume,
+    toggleMute,
     sleepTimerMinutes,
     sleepRemaining,
     setSleepTimer,
@@ -93,26 +98,8 @@ export default function PlayerScreen() {
   };
   const RepeatIcon = repeatMode === "one" ? Repeat1 : Repeat;
 
-  // ── Volume / mute (not exposed by expo-audio PlayerContext; hidden) ──────
-  const playerAny = player as unknown as {
-    volume?: number;
-    isMuted?: boolean;
-    setVolume?: (v: number) => void;
-    toggleMute?: () => void;
-  };
-  const volume = typeof playerAny.volume === "number" ? playerAny.volume : 1;
-  const isMuted = playerAny.isMuted ?? false;
-  const hasVolumeCtl =
-    typeof playerAny.setVolume === "function" && typeof playerAny.toggleMute === "function";
-
-  // ── Error state (engine will expose status.error) ──────────────────────────
-  // TODO(engine): expose audio status.error (expo-audio useAudioPlayerStatus)
-  // in PlayerContext so this retry row appears on real load failures.
-  const statusError = (
-    player as unknown as { status?: { error?: unknown }; error?: unknown }
-  ).status?.error ??
-    (player as unknown as { error?: unknown }).error ??
-    null;
+  // ── Volume / mute (live TrackPlayer controls) ────────────────────────────
+  const effectiveVolume = isMuted ? 0 : volume;
 
   // ── Sheets ─────────────────────────────────────────────────────────────────
   const [sheet, setSheet] = useState<"sleep" | "upnext" | null>(null);
@@ -199,6 +186,19 @@ export default function PlayerScreen() {
     seek(ratio * duration);
   };
 
+  // ── Volume bar: tap-to-set, same pattern as the seek bar ──────────────────
+  const volumeBarWidthRef = useRef(0);
+
+  const onVolumeBarLayout = (e: LayoutChangeEvent) => {
+    volumeBarWidthRef.current = e.nativeEvent.layout.width;
+  };
+
+  const onVolumeBarPress = (e: { nativeEvent: { locationX: number } }) => {
+    if (!volumeBarWidthRef.current) return;
+    const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / volumeBarWidthRef.current));
+    void setVolume(ratio);
+  };
+
   // ── Up Next: jump + remove (engine-backed, queue preserved) ──────────────
   const handleJump = async (index: number) => {
     if (index < 0 || index >= queue.length || index === queueIndex) return;
@@ -216,7 +216,7 @@ export default function PlayerScreen() {
     try {
       await playTrackImmediately(track);
     } catch {
-      // retry failed; error row stays visible via status.error
+      // retry failed; error row stays visible via audioError
     }
   };
 
@@ -301,10 +301,10 @@ export default function PlayerScreen() {
           </View>
 
           {/* Error state with retry */}
-          {statusError ? (
+          {audioError ? (
             <View className="mt-4 w-full flex-row items-center justify-between rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3">
               <Text className="flex-1 text-sm text-rose-300" numberOfLines={2}>
-                {typeof statusError === "string" ? statusError : t("downloadFailedBtn")}
+                {audioError}
               </Text>
               <Pressable
                 onPress={handleRetry}
@@ -386,12 +386,11 @@ export default function PlayerScreen() {
 
               <Pressable
                 hitSlop={8}
-                disabled={!hasVolumeCtl}
                 accessibilityLabel={isMuted ? t("muted") : t("vol")}
-                onPress={() => playerAny.toggleMute?.()}
-                className={`items-center rounded-xl px-3 py-2 ${!hasVolumeCtl ? "opacity-40" : ""} ${isMuted ? "bg-rose-500/15" : ""}`}
+                onPress={() => void toggleMute()}
+                className={`items-center rounded-xl px-3 py-2 ${isMuted ? "bg-rose-500/15" : ""}`}
               >
-                {isMuted || volume === 0 ? (
+                {effectiveVolume === 0 ? (
                   <VolumeX size={20} color={isMuted ? "#fb7185" : "#94a3b8"} />
                 ) : (
                   <Volume2 size={20} color="#94a3b8" />
@@ -412,6 +411,28 @@ export default function PlayerScreen() {
                   {queue.length > 0 ? queue.length : t("queue")}
                 </Text>
               </Pressable>
+            </View>
+          ) : null}
+
+          {/* Volume bar: tap-to-set, same pattern as the seek bar */}
+          {!isLive ? (
+            <View className="mt-4 w-full">
+              <View onLayout={onVolumeBarLayout} className="h-9 justify-center">
+                <Pressable onPress={onVolumeBarPress} className="h-4 justify-center">
+                  <View className="h-1 w-full overflow-hidden rounded-full bg-slate-700">
+                    <View
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${effectiveVolume * 100}%` }}
+                    />
+                  </View>
+                </Pressable>
+              </View>
+              <View className="mt-1 flex-row justify-between">
+                <Text className="text-xs text-slate-400">{t("vol")}</Text>
+                <Text className="text-xs text-slate-400">
+                  {isMuted ? t("muted") : `${Math.round(volume * 100)}%`}
+                </Text>
+              </View>
             </View>
           ) : null}
 
