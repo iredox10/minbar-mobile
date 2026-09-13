@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, Text, TextInput, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
-import { ListMusic, Plus, Trash2 } from "lucide-react-native";
+import { ListMusic, Pencil, Plus, Trash2, X } from "lucide-react-native";
 
 import { Screen } from "@/components/Screen";
 import { BackHeader } from "@/components/ui/BackHeader";
@@ -12,7 +12,9 @@ import {
   deletePlaylist,
   getPlaylistItemCounts,
   getPlaylists,
+  renamePlaylist,
 } from "@/lib/db";
+import { formatRelativeDate } from "@/lib/utils";
 import type { Playlist } from "@/types";
 
 export default function PlaylistsScreen() {
@@ -21,6 +23,8 @@ export default function PlaylistsScreen() {
   const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   const [counts, setCounts] = useState<Record<number, number>>({});
   const [newName, setNewName] = useState("");
+  const [editing, setEditing] = useState<Playlist | null>(null);
+  const [editName, setEditName] = useState("");
 
   const reload = useCallback(async () => {
     const [pls, cnts] = await Promise.all([getPlaylists(), getPlaylistItemCounts()]);
@@ -44,6 +48,20 @@ export default function PlaylistsScreen() {
 
   const handleDelete = async (id: number) => {
     await deletePlaylist(id);
+    reload();
+  };
+
+  const openRename = (p: Playlist) => {
+    setEditing(p);
+    setEditName(p.name);
+  };
+
+  const handleRename = async () => {
+    const name = editName.trim();
+    if (!editing?.id || !name) return;
+    await renamePlaylist(editing.id, name);
+    setEditing(null);
+    setEditName("");
     reload();
   };
 
@@ -77,6 +95,7 @@ export default function PlaylistsScreen() {
             <Pressable
               key={p.id}
               onPress={() => router.push({ pathname: "/playlists/[id]", params: { id: String(p.id) } })}
+              onLongPress={() => openRename(p)}
               className="flex-row items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 active:opacity-80 dark:border-slate-800 dark:bg-slate-800/40"
             >
               <View className="h-11 w-11 items-center justify-center rounded-full bg-primary/10">
@@ -88,15 +107,70 @@ export default function PlaylistsScreen() {
                 </Text>
                 <Text className="mt-0.5 text-xs text-slate-400">
                   {counts[p.id!] ?? 0} {t("episodes")}
+                  {p.createdAt ? ` · ${formatRelativeDate(new Date(p.createdAt))}` : ""}
                 </Text>
+                {p.description ? (
+                  <Text numberOfLines={1} className="mt-0.5 text-xs text-slate-500">
+                    {p.description}
+                  </Text>
+                ) : null}
               </View>
-              <Pressable onPress={() => handleDelete(p.id!)} hitSlop={10}>
+              <Pressable onPress={() => openRename(p)} hitSlop={10} accessibilityLabel="Rename playlist">
+                <Pencil size={17} color="#94a3b8" />
+              </Pressable>
+              <Pressable onPress={() => handleDelete(p.id!)} hitSlop={10} accessibilityLabel="Delete playlist">
                 <Trash2 size={18} color="#f87171" />
               </Pressable>
             </Pressable>
           ))}
         </View>
       )}
+
+      <Modal visible={editing !== null} transparent animationType="fade" onRequestClose={() => setEditing(null)}>
+        <Pressable
+          onPress={() => setEditing(null)}
+          className="flex-1 items-center justify-center bg-black/60 p-4"
+        >
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900"
+          >
+            <View className="mb-4 flex-row items-center justify-between">
+              <Text className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                {t("editPlaylist")}
+              </Text>
+              <Pressable onPress={() => setEditing(null)} hitSlop={8}>
+                <X size={20} color="#94a3b8" />
+              </Pressable>
+            </View>
+            <Text className="mb-1 text-sm text-slate-500">{t("name")}</Text>
+            <TextInput
+              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-[15px] text-slate-900 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-100"
+              placeholderTextColor="#94a3b8"
+              value={editName}
+              onChangeText={setEditName}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={handleRename}
+            />
+            <View className="mt-4 flex-row gap-3">
+              <Pressable
+                onPress={() => setEditing(null)}
+                className="flex-1 items-center rounded-xl bg-slate-200 py-3 dark:bg-slate-800"
+              >
+                <Text className="font-medium text-slate-600 dark:text-slate-300">{t("cancel")}</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleRename}
+                disabled={!editName.trim()}
+                className="flex-1 items-center rounded-xl bg-primary py-3 disabled:opacity-40"
+              >
+                <Text className="font-medium text-slate-900">{t("save")}</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </Screen>
   );
 }

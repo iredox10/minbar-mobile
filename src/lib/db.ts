@@ -160,6 +160,14 @@ export async function clearHistory(): Promise<void> {
   await write("history", []);
 }
 
+export async function deleteHistoryEntry(episodeId: string): Promise<void> {
+  const all = await read<PlaybackHistory[]>("history", []);
+  await write(
+    "history",
+    all.filter((h) => h.episodeId !== episodeId),
+  );
+}
+
 // ─── Bookmarks ──────────────────────────────────────────────────────────────
 
 export async function addBookmark(bookmark: Omit<Bookmark, "id">): Promise<number> {

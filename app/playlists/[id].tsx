@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { ListMusic, Play, Trash2 } from "lucide-react-native";
+import { CircleAlert, ListMusic, Play, Trash2 } from "lucide-react-native";
 
 import { Screen } from "@/components/Screen";
 import { BackHeader } from "@/components/ui/BackHeader";
@@ -11,7 +11,12 @@ import { usePlayer } from "@/context/PlayerContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getPlaylistItems, getPlaylists, removePlaylistItem } from "@/lib/db";
 import { getEpisodeById } from "@/lib/appwrite";
-import type { CurrentTrack, Episode, Playlist } from "@/types";
+import type { CurrentTrack, Episode, Playlist, PlaylistItem } from "@/types";
+
+interface PlaylistRow {
+  item: PlaylistItem;
+  episode: Episode | null;
+}
 
 export default function PlaylistDetailScreen() {
   const { t } = useTranslation();
@@ -20,17 +25,30 @@ export default function PlaylistDetailScreen() {
   const playlistId = Number(id ?? 0);
   const { playEpisode } = usePlayer();
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
-  const [episodes, setEpisodes] = useState<Episode[] | null>(null);
+  const [rows, setRows] = useState<PlaylistRow[] | null>(null);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     setLoading(true);
-    const pls = await getPlaylists();
-    setPlaylist(pls.find((p) => p.id === playlistId) ?? null);
-    const items = await getPlaylistItems(playlistId);
-    const resolved = await Promise.all(items.map((i) => getEpisodeById(i.episodeId)));
-    setEpisodes(resolved.filter((e): e is Episode => e !== null));
-    setLoading(false);
+    try {
+      const pls = await getPlaylists();
+      setPlaylist(pls.find((p) => p.id === playlistId) ?? null);
+      const items = await getPlaylistItems(playlistId);
+      const resolved = await Promise.all(
+        items.map(async (item): Promise<PlaylistRow> => {
+          try {
+            const episode = await getEpisodeById(item.episodeId);
+            return { item, episode };
+          } catch {
+            // Offline / fetch failure: keep the row so it isn't silently dropped.
+            return { item, episode: null };
+          }
+        }),
+      );
+      setRows(resolved);
+    } finally {
+      setLoading(false);
+    }
   }, [playlistId]);
 
   useFocusEffect(
@@ -39,9 +57,11 @@ export default function PlaylistDetailScreen() {
     }, [reload]),
   );
 
+  const playable = (rows ?? []).filter((r): r is PlaylistRow & { episode: Episode } => r.episode !== null);
+
   const handlePlayAll = () => {
-    if (!episodes || episodes.length === 0) return;
-    const queue: CurrentTrack[] = episodes.map((ep) => ({
+    if (playable.length === 0) return;
+    const queue: CurrentTrack[] = playable.map(({ episode: ep }) => ({
       id: ep.$id,
       title: ep.title,
       audioUrl: ep.audioUrl,
@@ -54,10 +74,8 @@ export default function PlaylistDetailScreen() {
     router.push("/player");
   };
 
-  const handleRemove = async (episodeId: string) => {
-    const items = await getPlaylistItems(playlistId);
-    const item = items.find((i) => i.episodeId === episodeId);
-    if (item?.id) await removePlaylistItem(item.id);
+  const handleRemove = async (playlistItemId: number) => {
+    await removePlaylistItem(playlistItemId);
     reload();
   };
 
@@ -66,7 +84,7 @@ export default function PlaylistDetailScreen() {
       <BackHeader
         title={playlist?.name ?? t("myPlaylist")}
         right={
-          episodes && episodes.length > 0 && !loading ? (
+          playable.length > 0 && !loading ? (
             <Pressable
               onPress={handlePlayAll}
               className="flex-row items-center gap-1.5 rounded-full bg-primary px-3.5 py-2"
@@ -84,20 +102,45 @@ export default function PlaylistDetailScreen() {
         </View>
       ) : playlist === null ? (
         <EmptyState title={t("noPlaylistsYetMsg")} icon={ListMusic} />
-      ) : episodes && episodes.length > 0 ? (
+      ) : rows && rows.length > 0 ? (
         <View className="gap-2.5">
-          {episodes.map((episode) => (
-            <EpisodeRow
-              key={episode.$id}
-              episode={episode}
-              showPlay={false}
-              trailing={
-                <Pressable onPress={() => handleRemove(episode.$id)} hitSlop={8}>
+          {rows.map(({ item, episode }) =>
+            episode ? (
+              <EpisodeRow
+                key={item.id ?? item.episodeId}
+                episode={episode}
+                showPlay={false}
+                trailing={
+                  <Pressable onPress={() => handleRemove(item.id!)} hitSlop={8}>
+                    <Trash2 size={18} color="#f87171" />
+                  </Pressable>
+                }
+              />
+            ) : (
+              <View
+                key={item.id ?? item.episodeId}
+                className="flex-row items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-3 dark:border-slate-700 dark:bg-slate-800/40"
+              >
+                <View className="h-[54px] w-[54px] items-center justify-center rounded-xl bg-slate-200/60 dark:bg-slate-700/40">
+                  <CircleAlert size={20} color="#94a3b8" />
+                </View>
+                <View className="flex-1">
+                  <Text
+                    numberOfLines={2}
+                    className="text-[15px] font-semibold leading-snug text-slate-500 dark:text-slate-400"
+                  >
+                    {item.episodeId}
+                  </Text>
+                  <Text className="mt-0.5 text-xs text-slate-400">
+                    {t("episodeNotFound")}
+                  </Text>
+                </View>
+                <Pressable onPress={() => handleRemove(item.id!)} hitSlop={8}>
                   <Trash2 size={18} color="#f87171" />
                 </Pressable>
-              }
-            />
-          ))}
+              </View>
+            ),
+          )}
         </View>
       ) : (
         <EmptyState title={t("noEpisodesInPlaylist")} icon={ListMusic} />
