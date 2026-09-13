@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
+import { ChevronRight } from "lucide-react-native";
 import { useTranslation } from "@/hooks/useTranslation";
 
 interface SectionHeaderProps {
@@ -15,7 +16,7 @@ export function SectionHeader({ title, action, onPress, rightSlot, accent }: Sec
   const { t } = useTranslation();
 
   return (
-    <View className="mb-3 flex-row items-center justify-between px-1">
+    <View className="mb-5 flex-row items-center justify-between px-1">
       <View className="flex-row items-center gap-2">
         {accent ? (
           <View
@@ -23,14 +24,17 @@ export function SectionHeader({ title, action, onPress, rightSlot, accent }: Sec
             style={{ backgroundColor: accent }}
           />
         ) : null}
-        <Text className="text-lg font-bold text-slate-900 dark:text-slate-100">{title}</Text>
+        <Text className="text-xl font-bold text-slate-900 dark:text-slate-100">{title}</Text>
       </View>
       {rightSlot ?? (
         onPress ? (
           <Pressable onPress={onPress} hitSlop={8}>
-            <Text className="text-sm font-medium text-primary">
-              {action ?? t("viewAll")}
-            </Text>
+            <View className="flex-row items-center gap-1">
+              <Text className="text-sm font-medium text-primary">
+                {action ?? t("viewAll")}
+              </Text>
+              <ChevronRight size={16} color="#d4a853" />
+            </View>
           </Pressable>
         ) : null
       )}
