@@ -283,13 +283,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     async (index: number, startPosition?: number) => {
       const q = queueRef.current;
       if (index < 0 || index >= q.length) return;
-      if (!nativeAvailableRef.current) return;
       const next = q[index];
       const prevId = trackRef.current?.id;
+      // JS state first so the UI always reflects the selection, even when
+      // the native player is unavailable (e.g. Expo Go) — the error banner
+      // then explains why instead of showing a blank "no track" screen.
       setQueueIndex(index);
       queueIndexRef.current = index;
       setTrack(next);
       trackRef.current = next;
+      if (!nativeAvailableRef.current) {
+        setAudioError(NATIVE_UNAVAILABLE_MESSAGE);
+        return;
+      }
       if (startPosition != null && startPosition > 0) {
         pendingSeekRef.current = startPosition;
         resumeOffsetRef.current = null;

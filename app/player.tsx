@@ -257,7 +257,11 @@ export default function PlayerScreen() {
             <Play size={42} color="#d4a853" />
           </View>
           <Text className="mt-8 text-center text-lg font-bold text-white">{t("noTrackPlaying")}</Text>
-          <Text className="mt-2 text-center text-sm text-slate-400">{t("browseContent")}</Text>
+          {audioError ? (
+            <Text className="mt-2 text-center text-sm text-amber-400">{audioError}</Text>
+          ) : (
+            <Text className="mt-2 text-center text-sm text-slate-400">{t("browseContent")}</Text>
+          )}
         </View>
       ) : (
         <ScrollView
