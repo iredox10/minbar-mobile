@@ -5,6 +5,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  Share,
   Text,
   View,
 } from "react-native";
@@ -23,6 +24,7 @@ import {
   Repeat1,
   RotateCcw,
   RotateCw,
+  Share2,
   SkipBack,
   SkipForward,
   Trash2,
@@ -37,6 +39,7 @@ import { AddToPlaylistSheet } from "@/components/AddToPlaylistSheet";
 import { usePlayer } from "@/context/PlayerContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getBookmarks, addBookmark, deleteBookmark, isFavorite, addFavorite, removeFavorite } from "@/lib/db";
+import { getEpisodeLinks } from "@/lib/share";
 import { trackFavoriteAdd } from "@/lib/analytics";
 import { formatDuration, getPlaybackSpeedLabel } from "@/lib/utils";
 import type { Bookmark as BookmarkRecord, CurrentTrack, RepeatMode } from "@/types";
@@ -268,6 +271,23 @@ export default function PlayerScreen() {
     }
   };
 
+  // Share link with current timestamp (?t=seconds) — web parity Tier 1.
+  // EpisodeDetail already honors ?t= on open, so recipients resume there.
+  const handleShareTimestamp = async () => {
+    if (!track || track.type !== "episode") return;
+    const seconds = Math.max(0, Math.floor(position));
+    const links = getEpisodeLinks(track.id, seconds > 0 ? seconds : undefined);
+    try {
+      await Share.share({
+        title: track.title,
+        message: `Listen to "${track.title}" on Arewa Central\n${links.webUrl}\n${links.deepLink}`,
+        url: links.webUrl,
+      });
+    } catch {
+      // dismissal — no-op
+    }
+  };
+
   const progress = duration > 0 ? Math.min(1, position / duration) : 0;
   const isLive = track?.type === "radio";
   const sleepLabel =
@@ -471,6 +491,19 @@ export default function PlayerScreen() {
                 )}
                 <Text className={`mt-0.5 text-[10px] ${isMuted ? "text-rose-400" : "text-slate-500"}`}>
                   {isMuted ? t("muted") : t("vol")}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => void handleShareTimestamp()}
+                hitSlop={8}
+                disabled={!track || track.type !== "episode"}
+                accessibilityLabel={t("shareLink")}
+                className="items-center rounded-xl px-3 py-2"
+              >
+                <Share2 size={20} color="#94a3b8" />
+                <Text className="mt-0.5 text-[10px] text-slate-500">
+                  {position > 0 ? formatDuration(Math.floor(position)) : t("share")}
                 </Text>
               </Pressable>
 

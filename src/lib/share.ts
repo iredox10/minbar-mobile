@@ -41,10 +41,11 @@ export interface ShareTarget extends ShareLinks {
 
 // ─── Link builders ────────────────────────────────────────────────────────────
 
-export function getEpisodeLinks(episodeId: string): ShareLinks {
+export function getEpisodeLinks(episodeId: string, timestampSeconds?: number): ShareLinks {
+  const suffix = timestampSeconds && timestampSeconds > 0 ? `?t=${Math.floor(timestampSeconds)}` : "";
   return {
-    deepLink: `${APP_SCHEME}episodes/${episodeId}`,
-    webUrl: `${WEB_BASE_URL}/podcasts/episode/${episodeId}`,
+    deepLink: `${APP_SCHEME}episodes/${episodeId}${suffix}`,
+    webUrl: `${WEB_BASE_URL}/podcasts/episode/${episodeId}${suffix}`,
   };
 }
 
