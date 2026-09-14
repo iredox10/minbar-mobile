@@ -13,7 +13,9 @@ import {
   Bookmark,
   ChevronDown,
   Gauge,
+  Heart,
   ListOrdered,
+  ListPlus,
   Moon,
   Pause,
   Play,
@@ -31,9 +33,11 @@ import {
 
 import { Screen } from "@/components/Screen";
 import { Artwork } from "@/components/Artwork";
+import { AddToPlaylistSheet } from "@/components/AddToPlaylistSheet";
 import { usePlayer } from "@/context/PlayerContext";
 import { useTranslation } from "@/hooks/useTranslation";
-import { getBookmarks, addBookmark, deleteBookmark } from "@/lib/db";
+import { getBookmarks, addBookmark, deleteBookmark, isFavorite, addFavorite, removeFavorite } from "@/lib/db";
+import { trackFavoriteAdd } from "@/lib/analytics";
 import { formatDuration, getPlaybackSpeedLabel } from "@/lib/utils";
 import type { Bookmark as BookmarkRecord, CurrentTrack, RepeatMode } from "@/types";
 
@@ -103,6 +107,50 @@ export default function PlayerScreen() {
 
   // ── Sheets ─────────────────────────────────────────────────────────────────
   const [sheet, setSheet] = useState<"sleep" | "upnext" | null>(null);
+  const [playlistOpen, setPlaylistOpen] = useState(false);
+
+  // ── Favorite (web parity: PlayerPage heart toggle) ─────────────────────────
+  const [favorite, setFavorite] = useState(false);
+
+  useEffect(() => {
+    if (!track || (track.type !== "episode" && track.type !== "dua")) {
+      setFavorite(false);
+      return;
+    }
+    let active = true;
+    isFavorite(track.type, track.id)
+      .then((v) => {
+        if (active) setFavorite(v);
+      })
+      .catch(() => {
+        if (active) setFavorite(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [track?.id, track?.type]);
+
+  const toggleFavorite = async () => {
+    if (!track || (track.type !== "episode" && track.type !== "dua")) return;
+    try {
+      if (favorite) {
+        await removeFavorite(track.type, track.id);
+        setFavorite(false);
+      } else {
+        await addFavorite({
+          type: track.type,
+          itemId: track.id,
+          title: track.title,
+          imageUrl: track.artworkUrl,
+          addedAt: new Date(),
+        });
+        trackFavoriteAdd(track.id, track.type, track.title);
+        setFavorite(true);
+      }
+    } catch {
+      // storage failure: leave UI unchanged
+    }
+  };
 
   // ── Bookmarks (add + remove) ───────────────────────────────────────────────
   const [bookmarkList, setBookmarkList] = useState<BookmarkRecord[]>([]);
@@ -237,18 +285,40 @@ export default function PlayerScreen() {
           <ChevronDown size={26} color="#94a3b8" />
         </Pressable>
         <Text className="text-sm font-medium text-slate-400">{t("nowPlaying")}</Text>
-        <Pressable
-          onPress={toggleBookmark}
-          hitSlop={12}
-          disabled={!track || track.type !== "episode"}
-          accessibilityLabel={bookmarked ? t("delete") : "Bookmark"}
-        >
-          <Bookmark
-            size={22}
-            color={bookmarked ? "#d4a853" : "#94a3b8"}
-            fill={bookmarked ? "#d4a853" : "transparent"}
-          />
-        </Pressable>
+        <View className="flex-row items-center gap-4">
+          <Pressable
+            onPress={() => setPlaylistOpen(true)}
+            hitSlop={12}
+            disabled={!track || (track.type !== "episode" && track.type !== "dua")}
+            accessibilityLabel={t("addToPlaylistTitle")}
+          >
+            <ListPlus size={22} color="#94a3b8" />
+          </Pressable>
+          <Pressable
+            onPress={toggleFavorite}
+            hitSlop={12}
+            disabled={!track || (track.type !== "episode" && track.type !== "dua")}
+            accessibilityLabel={favorite ? t("liked") : t("like")}
+          >
+            <Heart
+              size={22}
+              color={favorite ? "#f87171" : "#94a3b8"}
+              fill={favorite ? "#f87171" : "transparent"}
+            />
+          </Pressable>
+          <Pressable
+            onPress={toggleBookmark}
+            hitSlop={12}
+            disabled={!track || track.type !== "episode"}
+            accessibilityLabel={bookmarked ? t("delete") : "Bookmark"}
+          >
+            <Bookmark
+              size={22}
+              color={bookmarked ? "#d4a853" : "#94a3b8"}
+              fill={bookmarked ? "#d4a853" : "transparent"}
+            />
+          </Pressable>
+        </View>
       </View>
 
       {!track ? (
@@ -591,6 +661,14 @@ export default function PlayerScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      {/* ── Add to Playlist sheet (web parity: PlayerPage PlaylistSheet) ── */}
+      {track && (track.type === "episode" || track.type === "dua") ? (
+        <AddToPlaylistSheet
+          visible={playlistOpen}
+          episodeId={track.id}
+          onClose={() => setPlaylistOpen(false)}
+        />
+      ) : null}
     </Screen>
   );
 }
