@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { Download, Heart, ListPlus, Play, Share2, SkipForward } from "lucide-react-native";
+import { Download, Heart, ListPlus, Play, Quote, Share2, SkipForward } from "lucide-react-native";
 
 import { Screen } from "@/components/Screen";
 import { BackHeader } from "@/components/ui/BackHeader";
@@ -11,6 +11,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { EpisodeRow } from "@/components/ui/EpisodeRow";
 import { Artwork } from "@/components/Artwork";
 import { AddToPlaylistSheet } from "@/components/AddToPlaylistSheet";
+import { QuoteSheet } from "@/components/QuoteSheet";
 import { ShareSheet } from "@/components/ShareSheet";
 import { episodeTarget } from "@/lib/share";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -64,6 +65,7 @@ export default function EpisodeDetailScreen() {
   const [progress, setProgress] = useState<number | undefined>(undefined);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [quoteOpen, setQuoteOpen] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [savedPosition, setSavedPosition] = useState(0);
 
@@ -365,6 +367,13 @@ export default function EpisodeDetailScreen() {
               <Share2 size={18} color="#94a3b8" />
               <Text className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("share")}</Text>
             </Pressable>
+            <Pressable
+              onPress={() => setQuoteOpen(true)}
+              className="flex-1 flex-row items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white py-3 active:opacity-80 dark:border-slate-800 dark:bg-slate-800/40"
+            >
+              <Quote size={18} color="#94a3b8" />
+              <Text className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("shareClip")}</Text>
+            </Pressable>
           </View>
 
           {downloadError ? (
@@ -413,6 +422,13 @@ export default function EpisodeDetailScreen() {
             visible={shareOpen}
             onClose={() => setShareOpen(false)}
             target={episodeTarget(ep, speaker.data?.name ?? series.data?.title)}
+          />
+          <QuoteSheet
+            visible={quoteOpen}
+            episodeId={ep.$id}
+            episodeTitle={ep.title}
+            speakerName={speaker.data?.name ?? series.data?.title}
+            onClose={() => setQuoteOpen(false)}
           />
         </>
       )}
