@@ -12,7 +12,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.arewacentral.mobile",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -37,7 +39,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#0f172a"
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true
