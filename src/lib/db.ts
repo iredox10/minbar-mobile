@@ -308,3 +308,25 @@ export async function removePlaylistItem(id: number): Promise<void> {
     all.filter((i) => i.id !== id),
   );
 }
+
+// ─── Sync helpers (Appwrite roaming, web parity with minbar sync.ts) ─────────
+
+export async function getAllPlaylistItems(): Promise<PlaylistItem[]> {
+  return read<PlaylistItem[]>("playlist-items", []);
+}
+
+export async function setPlaylistAppwriteId(id: number, appwriteId: string): Promise<void> {
+  const all = await read<Playlist[]>("playlists", []);
+  await write(
+    "playlists",
+    all.map((p) => (p.id === id ? { ...p, appwriteId, updatedAt: new Date() } : p)),
+  );
+}
+
+export async function setPlaylistItemAppwriteId(id: number, appwriteId: string): Promise<void> {
+  const all = await read<PlaylistItem[]>("playlist-items", []);
+  await write(
+    "playlist-items",
+    all.map((i) => (i.id === id ? { ...i, appwriteId } : i)),
+  );
+}

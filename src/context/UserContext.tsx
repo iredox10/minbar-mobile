@@ -12,6 +12,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { OAuthProvider } from "appwrite";
 
 import { account, isAppwriteConfigured } from "@/lib/appwrite";
+import { syncUserData } from "@/lib/sync";
 import type { User } from "@/types";
 
 interface UserContextValue {
@@ -71,6 +72,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         const ids = serverFollowing.filter((id): id is string => typeof id === "string");
         setFollowing((prev) => Array.from(new Set([...prev, ...ids])));
       }
+      // Best-effort library roaming (web parity with minbar sync.ts).
+      syncUserData(session.$id).catch(() => {});
     } catch {
       setUser(null);
     } finally {
