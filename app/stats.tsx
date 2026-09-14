@@ -1,11 +1,15 @@
-import { useCallback, useMemo, useState } from "react";
-import { Pressable, Share, Text, View } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, Share, Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
-import { BarChart3, Share2 } from "lucide-react-native";
+import { BarChart3, Image as ImageIcon, Share2 } from "lucide-react-native";
+import { captureRef } from "react-native-view-shot";
+import * as Sharing from "expo-sharing";
 
 import { Screen } from "@/components/Screen";
 import { BackHeader } from "@/components/ui/BackHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ShareCard } from "@/components/ShareCard";
+import { WEB_BASE_URL } from "@/lib/share";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getRecentHistory } from "@/lib/db";
 import { formatDuration } from "@/lib/utils";
@@ -131,6 +135,34 @@ export default function StatsScreen() {
     }
   }, [stats.totalMinutes, stats.uniqueEpisodes]);
 
+  // Milestone card image (web MilestoneCardSheet parity).
+  const cardRef = useRef<View>(null);
+  const [sharingImage, setSharingImage] = useState(false);
+  const milestoneSummary =
+    stats.totalMinutes >= 60
+      ? `${Math.floor(stats.totalMinutes / 60)}h ${stats.totalMinutes % 60}m`
+      : `${stats.totalMinutes}m`;
+  const topSpeaker = stats.topSpeakers[0]?.name;
+
+  const handleShareImage = useCallback(async () => {
+    setSharingImage(true);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      if (!cardRef.current) return;
+      const uri = await captureRef(cardRef, { format: "png", quality: 1, result: "tmpfile" });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "image/png", dialogTitle: t("listeningStats") });
+      } else {
+        await handleShare();
+      }
+    } catch (error) {
+      console.error("Failed to share milestone card:", error);
+      await handleShare();
+    } finally {
+      setSharingImage(false);
+    }
+  }, [handleShare, t]);
+
   const hasData = loaded && history.length > 0 && stats.totalSessions > 0;
   const periods: Period[] = ["week", "month", "all"];
   const periodLabel = (p: Period) =>
@@ -142,13 +174,39 @@ export default function StatsScreen() {
         <View className="flex-1">
           <BackHeader title={t("listeningStats")} />
         </View>
-        <Pressable
-          onPress={handleShare}
-          accessibilityLabel={t("share")}
-          className="rounded-xl bg-slate-800/20 p-2.5 active:opacity-70 dark:bg-slate-800"
-        >
-          <Share2 size={18} color="#d4a853" />
-        </Pressable>
+        <View className="flex-row gap-2">
+          <Pressable
+            onPress={() => void handleShareImage()}
+            disabled={!hasData || sharingImage}
+            accessibilityLabel={t("shareCaptionPreview")}
+            className="rounded-xl bg-slate-800/20 p-2.5 active:opacity-70 dark:bg-slate-800"
+          >
+            {sharingImage ? (
+              <ActivityIndicator size="small" color="#d4a853" />
+            ) : (
+              <ImageIcon size={18} color="#d4a853" />
+            )}
+          </Pressable>
+          <Pressable
+            onPress={handleShare}
+            accessibilityLabel={t("share")}
+            className="rounded-xl bg-slate-800/20 p-2.5 active:opacity-70 dark:bg-slate-800"
+          >
+            <Share2 size={18} color="#d4a853" />
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Hidden milestone capture node */}
+      <View style={{ position: "absolute", left: -9999, top: 0 }} pointerEvents="none">
+        <ShareCard
+          ref={cardRef}
+          title={`${milestoneSummary} of listening`}
+          subtitle={topSpeaker ? `Top: ${topSpeaker}` : `${stats.uniqueEpisodes} episodes`}
+          badge={`${periodLabel(period)} Stats`}
+          qrValue={WEB_BASE_URL}
+          footer="Track your progress on Arewa Central"
+        />
       </View>
 
       <View className="mb-4 flex-row gap-2">
