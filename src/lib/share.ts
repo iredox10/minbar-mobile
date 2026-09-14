@@ -176,6 +176,7 @@ export function sharePlaylist(name: string): Promise<ShareResult> {
 export async function copyLink(text: string): Promise<boolean> {
   try {
     // @ts-ignore - expo-clipboard is an optional dependency
+    // eslint-disable-next-line import/no-unresolved
     const Clipboard = await import("expo-clipboard");
     if (typeof Clipboard.setStringAsync === "function") {
       await Clipboard.setStringAsync(text);

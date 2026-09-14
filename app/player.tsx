@@ -114,14 +114,18 @@ export default function PlayerScreen() {
 
   // ── Favorite (web parity: PlayerPage heart toggle) ─────────────────────────
   const [favorite, setFavorite] = useState(false);
+  const favId = track?.id;
+  const favType = track?.type;
 
   useEffect(() => {
-    if (!track || (track.type !== "episode" && track.type !== "dua")) {
+    if (!favType || (favType !== "episode" && favType !== "dua") || !favId) {
       setFavorite(false);
       return;
     }
+    const id = favId;
+    const type = favType;
     let active = true;
-    isFavorite(track.type, track.id)
+    isFavorite(type, id)
       .then((v) => {
         if (active) setFavorite(v);
       })
@@ -131,7 +135,7 @@ export default function PlayerScreen() {
     return () => {
       active = false;
     };
-  }, [track?.id, track?.type]);
+  }, [favId, favType]);
 
   const toggleFavorite = async () => {
     if (!track || (track.type !== "episode" && track.type !== "dua")) return;
