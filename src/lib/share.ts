@@ -35,6 +35,10 @@ export interface ShareTarget extends ShareLinks {
   title: string;
   /** Secondary line (e.g. speaker name under an episode title). */
   subtitle?: string;
+  /** Artwork URL for share-card rendering (optional). */
+  artworkUri?: string;
+  /** Small pill label on the share card (e.g. "Episode 12"). */
+  badge?: string;
   /** Prebuilt message containing BOTH links (deep link + https fallback). */
   message: string;
 }
@@ -78,8 +82,9 @@ function buildMessage(headline: string, links: ShareLinks): string {
 }
 
 export function episodeTarget(
-  episode: Pick<Episode, "$id" | "title">,
+  episode: Pick<Episode, "$id" | "title"> & { episodeNumber?: number },
   speakerName?: string,
+  opts?: { artworkUri?: string },
 ): ShareTarget {
   const links = getEpisodeLinks(episode.$id);
   const headline = `Listen to "${episode.title}"${speakerName ? ` by ${speakerName}` : ""} on Arewa Central`;
@@ -87,6 +92,8 @@ export function episodeTarget(
     kind: "episode",
     title: episode.title,
     subtitle: speakerName,
+    artworkUri: opts?.artworkUri,
+    badge: episode.episodeNumber ? `Episode ${episode.episodeNumber}` : undefined,
     ...links,
     message: buildMessage(headline, links),
   };

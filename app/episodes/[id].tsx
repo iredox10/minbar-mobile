@@ -421,7 +421,9 @@ export default function EpisodeDetailScreen() {
           <ShareSheet
             visible={shareOpen}
             onClose={() => setShareOpen(false)}
-            target={episodeTarget(ep, speaker.data?.name ?? series.data?.title)}
+            target={episodeTarget(ep, speaker.data?.name ?? series.data?.title, {
+              artworkUri: series.data?.artworkUrl,
+            })}
           />
           <QuoteSheet
             visible={quoteOpen}
