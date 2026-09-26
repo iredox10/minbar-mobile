@@ -334,6 +334,64 @@ export async function checkAutoDownload(latest: Episode[]): Promise<Episode[]> {
   return candidates;
 }
 
+// ─── Series bulk download (web SeriesDetail "Download all" parity) ───────────
+
+export interface DownloadSeriesByIdOptions extends DownloadSeriesOptions {
+  /** Series document, used only to enrich the stored download metadata. */
+  series?: Series | null;
+  /** Speaker name, used only to enrich the stored download metadata. */
+  speaker?: string;
+  /** Cap on how many episodes to queue. Defaults to the whole series. */
+  maxEpisodes?: number;
+}
+
+/**
+ * downloadSeriesById — bulk-download a whole series by id.
+ *
+ * Reusable entry point for "Download all" on the series screen (web parity).
+ * Fetches the series' episodes newest-last via `getEpisodesBySeries`, filters
+ * out anything without audio, then runs the same sequential `downloadSeries`
+ * queue (skip already-downloaded, retry transient failures, abort on the
+ * wifi/offline gate). Throws only the gate errors
+ * (`DOWNLOAD_WIFI` / `DOWNLOAD_OFFLINE`) and unexpected fetch failures, so
+ * callers can surface actionable UI; per-episode failures land in
+ * `result.failedIds` instead.
+ *
+ * Example (app/series/[id].tsx):
+ * ```ts
+ * const res = await downloadSeriesById(id, {
+ *   series,
+ *   speaker: series.speakerName,
+ *   onProgress: (p) => setProgress(p),
+ * });
+ * Alert.alert(t("done"), `${res.completed}/${res.total}`);
+ * ```
+ */
+export async function downloadSeriesById(
+  seriesId: string,
+  opts?: DownloadSeriesByIdOptions,
+): Promise<DownloadSeriesResult> {
+  const episodes = await getEpisodesBySeries(seriesId);
+  const queued = episodes.filter((e) => !!e?.audioUrl);
+  const limited = opts?.maxEpisodes ? queued.slice(-opts.maxEpisodes) : queued;
+  const meta = {
+    seriesId,
+    speakerId: opts?.series?.speakerId,
+    artworkUrl: opts?.series?.artworkUrl,
+    speaker: opts?.speaker,
+  };
+  return downloadSeries(limited, {
+    maxAttempts: opts?.maxAttempts,
+    onProgress: opts?.onProgress,
+    // Per-episode meta wins so a mixed queue keeps each episode's own series.
+    metaFor: (episode) => ({
+      ...meta,
+      seriesId: episode.seriesId ?? meta.seriesId,
+      speakerId: episode.speakerId ?? meta.speakerId,
+    }),
+  });
+}
+
 // ─── Auto download ───────────────────────────────────────────────────────────
 
 /** How many of the latest episodes to consider per auto-download run. */
