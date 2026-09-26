@@ -30,6 +30,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { getSettings, updateSettings } from "@/lib/db";
 import { deleteDownloaded, listDownloads } from "@/lib/downloads";
 import { PLAYBACK_SPEEDS, cn, getPlaybackSpeedLabel } from "@/lib/utils";
+import type { AppSettings } from "@/types";
 
 const LAST_SYNC_KEY = "arewa-last-sync";
 
@@ -39,7 +40,17 @@ const THEME_OPTIONS: { value: ThemeMode; icon: typeof Sun; labelKey: "light" | "
   { value: "system", icon: Monitor, labelKey: "system" },
 ];
 
+// Sleep-timer presets, kept in sync with the web app's
+// `sleepTimerOptions` in minbar/src/pages/Settings.tsx.
 const SLEEP_TIMER_OPTIONS = [5, 10, 15, 30, 45, 60];
+
+// The download-related settings this screen owns. Mirrors DEFAULT_SETTINGS in
+// src/lib/db.ts; the persisted values are read from the settings store on mount.
+type DownloadSettings = Pick<AppSettings, "downloadWifiOnly" | "autoDownload">;
+const DEFAULT_DOWNLOAD_SETTINGS: DownloadSettings = {
+  downloadWifiOnly: true,
+  autoDownload: false,
+};
 
 export default function SettingsScreen() {
   const { t } = useTranslation();
@@ -48,8 +59,12 @@ export default function SettingsScreen() {
   const { user, login, logout, updateLanguage } = useUser();
   const { rate: playbackSpeed, setSpeed, sleepTimerMinutes, sleepRemaining, setSleepTimer, cancelSleepTimer } =
     usePlayer();
-  const [wifiOnly, setWifiOnly] = useState(true);
-  const [autoDownload, setAutoDownload] = useState(false);
+  // Single source of truth for the download settings: mirrored from the settings
+  // store on mount and written straight back through `updateSettings` on toggle,
+  // so there is no second, separately-persisted copy of the same flags.
+  const [downloadSettings, setDownloadSettings] = useState<DownloadSettings>(
+    DEFAULT_DOWNLOAD_SETTINGS,
+  );
   const [storageBytes, setStorageBytes] = useState(0);
   const [storageCount, setStorageCount] = useState(0);
   const [lastSync, setLastSync] = useState<string | null>(null);
@@ -72,23 +87,28 @@ export default function SettingsScreen() {
   };
 
   useEffect(() => {
-    getSettings().then((s) => {
-      if (s) {
-        setWifiOnly(s.downloadWifiOnly);
-        setAutoDownload(s.autoDownload);
-      }
-    });
+    getSettings()
+      .then((s) => {
+        if (s) {
+          setDownloadSettings({
+            downloadWifiOnly: s.downloadWifiOnly,
+            autoDownload: s.autoDownload,
+          });
+        }
+      })
+      .catch(() => {
+        // best-effort: keep the defaults
+      });
     loadStorage();
   }, []);
 
-  const toggleWifiOnly = async (value: boolean) => {
-    setWifiOnly(value);
-    await updateSettings({ downloadWifiOnly: value });
-  };
-
-  const toggleAutoDownload = async (value: boolean) => {
-    setAutoDownload(value);
-    await updateSettings({ autoDownload: value });
+  const setDownloadSetting = async (key: keyof DownloadSettings, value: boolean) => {
+    setDownloadSettings((prev) => ({ ...prev, [key]: value }));
+    try {
+      await updateSettings({ [key]: value });
+    } catch (error) {
+      console.error(`Failed to save ${key}:`, error);
+    }
   };
 
   const storageMb = (storageBytes / (1024 * 1024)).toFixed(1);
@@ -353,8 +373,8 @@ export default function SettingsScreen() {
             iconColor="#94a3b8"
             label={t("wifiOnly")}
             hint={t("saveMobileData")}
-            value={wifiOnly}
-            onToggle={toggleWifiOnly}
+            value={downloadSettings.downloadWifiOnly}
+            onToggle={(value) => setDownloadSetting("downloadWifiOnly", value)}
           />
           <View className="h-px bg-slate-100 dark:bg-slate-800" />
           <SettingRow
@@ -363,8 +383,8 @@ export default function SettingsScreen() {
             iconColor="#94a3b8"
             label={t("autoDownload")}
             hint={t("newEpisodesFromSubs")}
-            value={autoDownload}
-            onToggle={toggleAutoDownload}
+            value={downloadSettings.autoDownload}
+            onToggle={(value) => setDownloadSetting("autoDownload", value)}
           />
           <View className="h-px bg-slate-100 dark:bg-slate-800" />
           {/* Storage used meter */}
