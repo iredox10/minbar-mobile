@@ -60,6 +60,8 @@ interface PlayerContextValue {
   addToQueue: (track: CurrentTrack) => void;
   removeFromQueue: (index: number) => void;
   jumpToIndex: (index: number) => Promise<void>;
+  /** Jump to a queued track from the Up Next sheet (web parity: jumpToQueueIndex). */
+  jumpToQueueIndex: (index: number) => void;
   clearQueue: () => void;
   setSleepTimer: (minutes: number) => void;
   cancelSleepTimer: () => void;
