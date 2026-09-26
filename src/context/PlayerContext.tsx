@@ -816,6 +816,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [syncIndexFromNative],
   );
 
+  /** Web-parity queue jump for the Up Next sheet; no-op on invalid indices. */
+  const jumpToQueueIndex = useCallback(
+    (index: number) => {
+      const q = queueRef.current;
+      // Defensive: no-op on an empty queue or any out-of-range/non-integer index.
+      if (!Number.isInteger(index)) return;
+      if (index < 0 || index >= q.length) return;
+      void jumpToIndex(index);
+    },
+    [jumpToIndex],
+  );
+
   const clearQueue = useCallback(() => {
     // NOTE: V5 clear() stops audio natively, so unlike the old player the
     // current playback does not survive a clear. The JS queue/index reset
@@ -980,6 +992,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       addToQueue,
       removeFromQueue,
       jumpToIndex,
+      jumpToQueueIndex,
       clearQueue,
       setSleepTimer,
       cancelSleepTimer,
@@ -1015,6 +1028,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       addToQueue,
       removeFromQueue,
       jumpToIndex,
+      jumpToQueueIndex,
       clearQueue,
       setSleepTimer,
       cancelSleepTimer,
