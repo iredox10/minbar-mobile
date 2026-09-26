@@ -29,6 +29,8 @@ interface Props {
   track: CurrentTrack | null;
   onClose: () => void;
   onChanged?: (episodeId: string, downloaded: boolean) => void;
+  /** Surfaces the last failure so the player action icon can show an error state. */
+  onError?: (episodeId: string, message: string | null) => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -43,7 +45,7 @@ function formatDate(value: Date | string | undefined): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
 }
 
-export function PlayerDownloadSheet({ visible, track, onClose, onChanged }: Props) {
+export function PlayerDownloadSheet({ visible, track, onClose, onChanged, onError }: Props) {
   const { t } = useTranslation();
   const episodeId = track?.id;
   const isRadio = track?.type === "radio";
@@ -108,6 +110,7 @@ export function PlayerDownloadSheet({ visible, track, onClose, onChanged }: Prop
     setError(null);
     setProgress(0);
     setStatus("downloading");
+    if (track) onError?.(track.id, null);
     try {
       await downloadEpisode(
         {
@@ -129,17 +132,20 @@ export function PlayerDownloadSheet({ visible, track, onClose, onChanged }: Prop
     } catch (err) {
       if (!mounted.current) return;
       const code = (err as Error & { code?: string })?.code;
-      if (code === "DOWNLOAD_WIFI") setError(t("wifiOnly"));
-      else if (code === "DOWNLOAD_OFFLINE") setError(t("offline"));
+      let message: string;
+      if (code === "DOWNLOAD_WIFI") message = t("wifiOnly");
+      else if (code === "DOWNLOAD_OFFLINE") message = t("offline");
       else if (err instanceof Error && err.message && err.message !== "wifi" && err.message !== "offline") {
-        setError(err.message);
-      } else setError(t("downloadFailed"));
+        message = err.message;
+      } else message = t("downloadFailed");
+      setError(message);
       setStatus("error");
+      onError?.(track.id, message);
     } finally {
       if (mounted.current) setProgress(getProgress(track.id) ?? 0);
       void refresh();
     }
-  }, [track, disabled, onChanged, t, refresh]);
+  }, [track, disabled, onChanged, onError, t, refresh]);
 
   const remove = useCallback(async () => {
     if (!track) return;

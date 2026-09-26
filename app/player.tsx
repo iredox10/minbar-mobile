@@ -11,8 +11,11 @@ import {
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import {
+  AlertCircle,
   Bookmark,
+  CheckCircle2,
   ChevronDown,
+  Download,
   Gauge,
   Heart,
   ListOrdered,
@@ -36,10 +39,20 @@ import {
 import { Screen } from "@/components/Screen";
 import { Artwork } from "@/components/Artwork";
 import { AddToPlaylistSheet } from "@/components/AddToPlaylistSheet";
+import { PlayerDownloadSheet } from "@/components/PlayerDownloadSheet";
 import { usePlayer } from "@/context/PlayerContext";
 import { useTranslation } from "@/hooks/useTranslation";
-import { getBookmarks, addBookmark, deleteBookmark, isFavorite, addFavorite, removeFavorite } from "@/lib/db";
+import {
+  getBookmarks,
+  addBookmark,
+  deleteBookmark,
+  isDownloaded,
+  isFavorite,
+  addFavorite,
+  removeFavorite,
+} from "@/lib/db";
 import { getEpisodeLinks } from "@/lib/share";
+import { getProgress, isDownloading, subscribeDownloads, subscribeProgress } from "@/lib/downloads";
 import { trackFavoriteAdd } from "@/lib/analytics";
 import { formatDuration, getPlaybackSpeedLabel } from "@/lib/utils";
 import type { Bookmark as BookmarkRecord, CurrentTrack, RepeatMode } from "@/types";
@@ -109,8 +122,62 @@ export default function PlayerScreen() {
   const effectiveVolume = isMuted ? 0 : volume;
 
   // ── Sheets ─────────────────────────────────────────────────────────────────
-  const [sheet, setSheet] = useState<"sleep" | "upnext" | null>(null);
+  const [sheet, setSheet] = useState<"sleep" | "upnext" | "download" | null>(null);
   const [playlistOpen, setPlaylistOpen] = useState(false);
+
+  // ── Download status for the current track (web parity: PlayerPage useDownload)
+  const [downloaded, setDownloaded] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const downloadId = track?.id;
+
+  // Radio streams have no audio file, so downloading is never offered for them.
+  const canDownload = !!track && track.type !== "radio" && !!track.audioUrl;
+
+  useEffect(() => {
+    setDownloadError(null);
+    if (!downloadId || !canDownload) {
+      setDownloaded(false);
+      setDownloading(false);
+      setDownloadProgress(0);
+      return;
+    }
+    const id = downloadId;
+    let active = true;
+    isDownloaded(id)
+      .then((v) => {
+        if (!active) return;
+        setDownloaded(v);
+        setDownloading(isDownloading(id));
+        setDownloadProgress(getProgress(id) ?? 0);
+      })
+      .catch(() => {
+        if (active) setDownloaded(false);
+      });
+    const unsubProgress = subscribeProgress((pid, pct) => {
+      if (!active || pid !== id) return;
+      setDownloadProgress(pct);
+      setDownloading(true);
+    });
+    const unsubState = subscribeDownloads(() => {
+      if (!active) return;
+      setDownloading(isDownloading(id));
+      setDownloadProgress(getProgress(id) ?? 0);
+      isDownloaded(id)
+        .then((v) => {
+          if (active) setDownloaded(v);
+        })
+        .catch(() => {
+          if (active) setDownloaded(false);
+        });
+    });
+    return () => {
+      active = false;
+      unsubProgress();
+      unsubState();
+    };
+  }, [downloadId, canDownload]);
 
   // ── Favorite (web parity: PlayerPage heart toggle) ─────────────────────────
   const [favorite, setFavorite] = useState(false);
@@ -310,6 +377,26 @@ export default function PlayerScreen() {
         </Pressable>
         <Text className="text-sm font-medium text-slate-400">{t("nowPlaying")}</Text>
         <View className="flex-row items-center gap-4">
+          <Pressable
+            onPress={() => setSheet("download")}
+            hitSlop={12}
+            disabled={!canDownload}
+            accessibilityLabel={t("downloadEpisode")}
+            className="items-center"
+          >
+            {downloaded ? (
+              <CheckCircle2 size={22} color="#34d399" />
+            ) : downloading ? (
+              <Download size={22} color="#d4a853" />
+            ) : downloadError ? (
+              <AlertCircle size={22} color="#fb7185" />
+            ) : (
+              <Download size={22} color={canDownload ? "#94a3b8" : "#475569"} />
+            )}
+            {downloading ? (
+              <Text className="mt-0.5 font-mono text-[9px] text-primary">{downloadProgress}%</Text>
+            ) : null}
+          </Pressable>
           <Pressable
             onPress={() => setPlaylistOpen(true)}
             hitSlop={12}
@@ -698,6 +785,23 @@ export default function PlayerScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      {/* ── Download sheet (web parity: PlayerPage DownloadSheet) ── */}
+      {track ? (
+        <PlayerDownloadSheet
+          visible={sheet === "download"}
+          track={track}
+          onClose={() => setSheet(null)}
+          onChanged={(id, isDone) => {
+            if (id !== downloadId) return;
+            setDownloaded(isDone);
+            setDownloading(false);
+            if (isDone) setDownloadError(null);
+          }}
+          onError={(id, message) => {
+            if (id === downloadId) setDownloadError(message);
+          }}
+        />
+      ) : null}
       {/* ── Add to Playlist sheet (web parity: PlayerPage PlaylistSheet) ── */}
       {track && (track.type === "episode" || track.type === "dua") ? (
         <AddToPlaylistSheet
