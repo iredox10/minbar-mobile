@@ -1,7 +1,7 @@
 import "../src/global.css";
 
-import { useEffect } from "react";
-import { View } from "react-native";
+import { useCallback, useEffect } from "react";
+import { AppState, View } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
@@ -19,8 +19,9 @@ import { Amiri_400Regular, Amiri_700Bold } from "@expo-google-fonts/amiri";
 
 import { SettingsProvider, useSettings } from "@/context/SettingsContext";
 import { PlayerProvider } from "@/context/PlayerContext";
-import { UserProvider } from "@/context/UserContext";
+import { UserProvider, useUser } from "@/context/UserContext";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { runAutoDownload } from "@/lib/downloads";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -46,6 +47,34 @@ function resolveDeepLink(url: string): { pathname: string; params: Record<string
       // the auth-callback route — ignore them here.
       return null;
   }
+}
+
+/**
+ * AutoDownloadOnForeground — drives the "Auto download / new episodes from subs"
+ * setting. Runs once the followed-speaker list is loaded and again every time the
+ * app comes back to the foreground. `runAutoDownload` is a no-op when the setting
+ * is off / nothing is followed / the device is offline or off wifi, and it never
+ * throws, so this can be fired without any extra guarding.
+ */
+function AutoDownloadOnForeground() {
+  const { following, loading } = useUser();
+
+  const trigger = useCallback(() => {
+    runAutoDownload(following).catch(() => {});
+  }, [following]);
+
+  useEffect(() => {
+    // Wait for UserProvider to hydrate `following` from cache/session so a cold
+    // start does not run with an empty list.
+    if (loading || following.length === 0) return;
+    trigger();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") trigger();
+    });
+    return () => subscription.remove();
+  }, [loading, following.length, trigger]);
+
+  return null;
 }
 
 function RootNavigator() {
@@ -75,6 +104,7 @@ function RootNavigator() {
   return (
     <View className={isDark ? "dark flex-1 bg-slate-900" : "flex-1 bg-slate-100"}>
       <StatusBar style={isDark ? "light" : "dark"} />
+      <AutoDownloadOnForeground />
       <OfflineBanner />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />

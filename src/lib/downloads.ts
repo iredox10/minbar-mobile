@@ -8,8 +8,9 @@ import {
   isDownloaded,
   removeDownload,
 } from "@/lib/db";
+import { getEpisodesBySeries, getLatestEpisodes } from "@/lib/appwrite";
 import { trackDownload } from "@/lib/analytics";
-import type { DownloadedEpisode, Episode } from "@/types";
+import type { DownloadedEpisode, Episode, Series } from "@/types";
 
 interface DownloadMeta {
   seriesId?: string;
@@ -307,19 +308,16 @@ export async function downloadSeries(
 }
 
 /**
- * checkAutoDownload — stub entry point for auto-download.
+ * checkAutoDownload — filters a latest-episodes feed down to the episodes that
+ * are eligible for auto-download.
  *
- * Intended usage (main agent): after fetching the latest episodes feed, call
- * `const candidates = await checkAutoDownload(latest)` and then, if
- * non-empty, `await downloadSeries(candidates, { onProgress })`.
+ * Returns [] unless the `autoDownload` setting is ON and the device passes the
+ * wifi/offline gates; otherwise it returns the episodes that have an audioUrl
+ * and are neither downloaded nor already downloading.
  *
- * Current behavior: returns the episodes eligible for auto-download — the
- * `autoDownload` setting is ON, the device passes the wifi/offline gates,
- * and the episode has an audioUrl and is not already downloaded (or
- * downloading). Returns [] otherwise.
- *
- * Deliberately NOT wired to any background worker/scheduler here; scheduling
- * (background fetch/task) is left to the main agent.
+ * Prefer calling `runAutoDownload(followedSpeakerIds)` — this is the low-level
+ * filter; that wrapper adds the followed-speaker scoping, the dedupe guard and
+ * the never-throw contract used by the app-foreground trigger.
  */
 export async function checkAutoDownload(latest: Episode[]): Promise<Episode[]> {
   const settings = await getSettings();
@@ -334,4 +332,85 @@ export async function checkAutoDownload(latest: Episode[]): Promise<Episode[]> {
     candidates.push(episode);
   }
   return candidates;
+}
+
+// ─── Auto download ───────────────────────────────────────────────────────────
+
+/** How many of the latest episodes to consider per auto-download run. */
+const AUTO_DOWNLOAD_FEED_LIMIT = 25;
+
+export interface RunAutoDownloadOptions {
+  onProgress?: DownloadSeriesProgressCallback;
+  /** Override the latest-episodes feed size. */
+  limit?: number;
+}
+
+// Single-flight guard so repeated foregrounds cannot queue the same episodes twice.
+let autoDownloadInFlight: Promise<DownloadSeriesResult> | null = null;
+
+/**
+ * runAutoDownload — fetch the latest episodes and queue any that belong to a
+ * followed ("subscribed") speaker.
+ *
+ * This is the trigger `checkAutoDownload` was written for. It is safe to call
+ * on every app foreground:
+ *  - returns early when the `autoDownload` setting is off, no speakers are
+ *    followed, or the device is offline / not on wifi (via `canDownloadNow`),
+ *  - de-duplicates concurrent runs (a foreground storm cannot double-queue),
+ *  - never throws — every failure path returns the partial/empty result and
+ *    logs a warning, so it can be fired from a mount/AppState effect.
+ */
+export function runAutoDownload(
+  followedSpeakerIds: string[],
+  opts?: RunAutoDownloadOptions,
+): Promise<DownloadSeriesResult> {
+  if (autoDownloadInFlight) return autoDownloadInFlight;
+
+  const speakerIds = (followedSpeakerIds ?? []).filter(
+    (id): id is string => typeof id === "string" && id.length > 0,
+  );
+  const run = (async (): Promise<DownloadSeriesResult> => {
+    const empty: DownloadSeriesResult = {
+      current: 0,
+      total: 0,
+      completed: 0,
+      failed: 0,
+      skipped: 0,
+      failedIds: [],
+    };
+    try {
+      const settings = await getSettings();
+      if (!settings?.autoDownload) return empty;
+      if (speakerIds.length === 0) return empty;
+
+      // Belt-and-braces offline check: canDownloadNow only consults NetInfo
+      // when the wifi-only gate is on.
+      const net = await NetInfo.fetch();
+      if (!net.isConnected || net.isInternetReachable === false) return empty;
+
+      const latest = await getLatestEpisodes(opts?.limit ?? AUTO_DOWNLOAD_FEED_LIMIT);
+      const wanted = new Set(speakerIds);
+      const fromSubs = latest.filter((e) => !!e?.speakerId && wanted.has(e.speakerId));
+
+      const candidates = await checkAutoDownload(fromSubs);
+      if (candidates.length === 0) return empty;
+
+      return await downloadSeries(candidates, {
+        onProgress: opts?.onProgress,
+        metaFor: (episode) => ({
+          seriesId: episode.seriesId,
+          speakerId: episode.speakerId,
+        }),
+      });
+    } catch (error) {
+      // Auto-download is a background nicety: log and bail, never surface.
+      console.warn("Auto download skipped:", error);
+      return empty;
+    } finally {
+      autoDownloadInFlight = null;
+    }
+  })();
+
+  autoDownloadInFlight = run;
+  return run;
 }
