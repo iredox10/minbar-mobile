@@ -3,6 +3,12 @@ import { Text, View } from "react-native";
 
 import { useTranslation } from "@/hooks/useTranslation";
 
+// Local copy for the generic 404 screen. i18n.ts is owned by another agent and
+// has no `pageNotFound` key yet; move these there when that key is added.
+const NOT_FOUND_TITLE = "Page not found";
+const NOT_FOUND_DESC =
+  "This screen doesn't exist or has moved. It may no longer be part of the app.";
+
 export default function NotFoundScreen() {
   const { t } = useTranslation();
 
@@ -12,7 +18,10 @@ export default function NotFoundScreen() {
         404
       </Text>
       <Text className="mt-2 text-slate-500 dark:text-slate-400">
-        {t("episodeNotFound")}
+        {NOT_FOUND_TITLE}
+      </Text>
+      <Text className="mt-1 text-center text-sm text-slate-500 dark:text-slate-400">
+        {NOT_FOUND_DESC}
       </Text>
       <Link
         href="/"

@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import {
@@ -16,6 +17,8 @@ import {
 import { Screen } from "@/components/Screen";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+
+import NotFoundScreen from "../+not-found";
 
 interface LibraryEntry {
   key: string;
@@ -55,13 +58,21 @@ export default function LibraryScreen() {
     { key: "stats", title: t("listeningStats"), description: t("resumeWhereYouLeftOff"), icon: Activity, route: ROUTES.stats },
   ];
 
+  // Unknown library keys (no route mapped) land on the real not-found screen
+  // rather than a placeholder page.
+  const [missingEntry, setMissingEntry] = useState<string | null>(null);
+
   const go = (route?: LibraryEntry["route"], fallbackTitle?: string) => {
     if (route) {
       router.push(route as never);
-    } else {
-      router.push({ pathname: "/coming-soon", params: { title: fallbackTitle ?? "" } });
+      return;
     }
+    setMissingEntry(fallbackTitle ?? t("myLibrary"));
   };
+
+  if (missingEntry) {
+    return <NotFoundScreen />;
+  }
 
   return (
     <Screen>
