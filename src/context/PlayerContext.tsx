@@ -24,7 +24,7 @@ import {
   updateSettings,
 } from "@/lib/db";
 import { PLAYBACK_SPEEDS } from "@/lib/utils";
-import { clearPlaybackState } from "@/lib/appwrite";
+import { clearPlaybackState, isAppwriteConfigured, savePlaybackState } from "@/lib/appwrite";
 import { trackPlayComplete, trackPlayStart } from "@/lib/analytics";
 import type { CurrentTrack, RepeatMode } from "@/types";
 
@@ -631,6 +631,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       saveProgressOnPause();
     } else {
       setAudioError(null);
+      // Cold-start resume: the restore path stashed the saved position in
+      // resumeOffsetRef (never converted because togglePlay calls play()
+      // directly). Apply it here before the first play, otherwise the
+      // reopened app restarts the episode at 0:00.
+      const pending = pendingSeekRef.current ?? resumeOffsetRef.current;
+      if (pending != null && pending > 0) {
+        pendingSeekRef.current = null;
+        resumeOffsetRef.current = null;
+        try {
+          TrackPlayer.seekTo(pending);
+          positionRef.current = pending;
+          setPositionState(pending);
+        } catch {
+          // Not ready yet — re-queue so PlaybackState.Ready retries it.
+          pendingSeekRef.current = pending;
+        }
+      }
       try {
         TrackPlayer.play();
       } catch (e) {
@@ -644,7 +661,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const seek = useCallback(async (seconds: number) => {
     if (!nativeAvailableRef.current) return;
-    const target = Math.max(0, seconds);
+    // Clamp to the known duration (web parity: audio.ts seekRelative) so ±15s
+    // / ±30s cannot overshoot a short or not-yet-loaded track.
+    const total = durationRef.current || trackRef.current?.duration || 0;
+    const target = total > 0 ? Math.min(Math.max(0, seconds), total) : Math.max(0, seconds);
     try {
       TrackPlayer.seekTo(target);
       positionRef.current = target;
@@ -845,6 +865,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setQueueIndex(0);
   }, []);
 
+  /**
+   * Mirror the web behaviour (AudioContext.setPlaybackSpeed): persist the new
+   * rate with the current position so a cloud resume is not stale. No-ops when
+   * unconfigured/unauthenticated and never throws.
+   */
+  const pushSpeedToCloud = useCallback((speed: number) => {
+    const current = trackRef.current;
+    if (!current || current.type === "radio" || !isAppwriteConfigured()) return;
+    const pos = Math.floor(positionRef.current);
+    const total = Math.floor(durationRef.current || current.duration || 0);
+    void savePlaybackState({ ...current, duration: total }, pos, speed).catch(() => {});
+  }, []);
+
   const changeSpeed = useCallback(async () => {
     if (trackRef.current?.type === "radio") return;
     const settings = await getSettings();
@@ -860,7 +893,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
     }
     await updateSettings({ playbackSpeed: next });
-  }, []);
+    pushSpeedToCloud(next);
+  }, [pushSpeedToCloud]);
 
   const setSpeed = useCallback(async (next: number) => {
     setRateState(next);
@@ -873,7 +907,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
     }
     await updateSettings({ playbackSpeed: next });
-  }, []);
+    pushSpeedToCloud(next);
+  }, [pushSpeedToCloud]);
 
   // Sleep timer as a wall-clock deadline (not a tick counter) so it still
   // fires if the JS timer is throttled while backgrounded. The 1s interval
