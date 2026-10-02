@@ -6,6 +6,7 @@ import {
   Activity,
   Bookmark,
   BookOpen,
+  Download,
   Heart,
   History,
   Layers,
@@ -30,6 +31,9 @@ interface LibraryEntry {
 
 const ROUTES: Record<string, LibraryEntry["route"]> = {
   favorites: { pathname: "/favorites" },
+  // Web parity: the Library "My Library" section links to Downloads
+  // (minbar/src/pages/Library.tsx:95-102).
+  downloads: { pathname: "/downloads" },
   playlists: { pathname: "/playlists" },
   history: { pathname: "/history" },
   bookmarks: { pathname: "/bookmarks" },
@@ -47,6 +51,7 @@ export default function LibraryScreen() {
 
   const entries: LibraryEntry[] = [
     { key: "favorites", title: t("favorites"), description: t("favoritesDesc"), icon: Heart, route: ROUTES.favorites },
+    { key: "downloads", title: t("downloads"), description: t("downloadsDesc"), icon: Download, route: ROUTES.downloads },
     { key: "playlists", title: t("playlists"), description: t("playlistsDesc"), icon: ListMusic, route: ROUTES.playlists },
     { key: "history", title: t("history"), description: t("historyDesc"), icon: History, route: ROUTES.history },
     { key: "bookmarks", title: t("bookmarks"), description: t("bookmarksDesc"), icon: Bookmark, route: ROUTES.bookmarks },

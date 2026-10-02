@@ -29,8 +29,10 @@ import { useUser } from "@/context/UserContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getSettings, updateSettings } from "@/lib/db";
 import { deleteDownloaded, listDownloads } from "@/lib/downloads";
-import { PLAYBACK_SPEEDS, cn, getPlaybackSpeedLabel } from "@/lib/utils";
+import { PLAYBACK_SPEEDS, cn, formatRelativeDate, getPlaybackSpeedLabel } from "@/lib/utils";
 import type { AppSettings } from "@/types";
+
+import { STORAGE_BAR_REFERENCE_BYTES } from "./downloads";
 
 const LAST_SYNC_KEY = "arewa-last-sync";
 
@@ -415,7 +417,12 @@ export default function SettingsScreen() {
             <View className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800">
               <View
                 className="h-full rounded-full bg-primary"
-                style={{ width: `${Math.min(100, (storageBytes / (200 * 1024 * 1024)) * 100)}%` }}
+                style={{
+                  width: `${Math.min(
+                    100,
+                    Math.max(storageBytes > 0 ? 6 : 0, (storageBytes / STORAGE_BAR_REFERENCE_BYTES) * 100),
+                  )}%`,
+                }}
               />
             </View>
           </View>
@@ -427,13 +434,13 @@ export default function SettingsScreen() {
             </View>
             <View className="flex-1">
               <Text className="text-sm font-medium text-slate-200 dark:text-slate-100">
-                Last sync
+                {t("lastSync")}
               </Text>
               <Text className="mt-0.5 text-xs text-slate-500">
                 {(() => {
                   if (!lastSync) return "—";
                   const d = new Date(lastSync);
-                  return Number.isNaN(d.getTime()) ? lastSync : d.toLocaleString();
+                  return Number.isNaN(d.getTime()) ? lastSync : formatRelativeDate(d);
                 })()}
               </Text>
             </View>

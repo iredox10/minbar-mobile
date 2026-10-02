@@ -309,6 +309,7 @@ export const translations = {
     totalUsed: 'Total used',
     clearCache: 'Clear cache',
     storage: 'Storage',
+    lastSync: 'Last sync',
 },
   ha: {
     home: 'Gida',
@@ -620,6 +621,7 @@ export const translations = {
     totalUsed: 'Jimlar amfani',
     clearCache: 'Goge ma’ajiya',
     storage: 'Ma’ajiya',
+    lastSync: 'Sabuntawa na kai',
 }
 };
 

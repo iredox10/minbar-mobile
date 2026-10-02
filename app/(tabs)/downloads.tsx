@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import { Download, HardDrive, Play, RefreshCw, Trash2 } from "lucide-react-native";
+import { Download, HardDrive, Pause, Play, RefreshCw, Trash2 } from "lucide-react-native";
 
 import { Screen } from "@/components/Screen";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -17,22 +17,28 @@ import {
   subscribeDownloads,
   subscribeProgress,
 } from "@/lib/downloads";
-import { formatDate, formatDuration, formatFileSize } from "@/lib/utils";
+import { formatDuration, formatFileSize, formatRelativeDate, cn } from "@/lib/utils";
 import type { DownloadedEpisode } from "@/types";
 
-// Display-only scale for the storage usage bar (no device quota API used).
-const STORAGE_BAR_REFERENCE_BYTES = 500 * 1024 * 1024;
+/**
+ * Display-only scale for the "storage used" meter (no device quota API used).
+ * Shared with the Settings screen so both meters fill against the same reference.
+ */
+export const STORAGE_BAR_REFERENCE_BYTES = 500 * 1024 * 1024;
 
 function formatDownloadedAt(value: Date | string): string {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return formatDate(date.toISOString());
+  // Relative ("2h ago") like the other screens; falls back to an absolute date
+  // inside formatRelativeDate once it is older than a week.
+  return formatRelativeDate(date);
 }
 
 export default function DownloadsScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const { playTrackImmediately } = usePlayer();
+  const { playTrackImmediately, togglePlay, track, isPlaying } = usePlayer();
+  const nowPlayingId = isPlaying ? (track?.id ?? null) : null;
   const [items, setItems] = useState<DownloadedEpisode[] | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [usage, setUsage] = useState<{ count: number; bytes: number }>({ count: 0, bytes: 0 });
@@ -88,7 +94,13 @@ export default function DownloadsScreen() {
     }
   };
 
-  const handleClearAll = async () => {
+  const count = items?.length ?? 0;
+  const barFill =
+    usage.bytes > 0
+      ? Math.min(100, Math.max(6, (usage.bytes / STORAGE_BAR_REFERENCE_BYTES) * 100))
+      : 0;
+
+  const doClearAll = async () => {
     if (clearing) return;
     setClearing(true);
     try {
@@ -99,11 +111,18 @@ export default function DownloadsScreen() {
     }
   };
 
-  const count = items?.length ?? 0;
-  const barFill =
-    usage.bytes > 0
-      ? Math.min(100, Math.max(6, (usage.bytes / STORAGE_BAR_REFERENCE_BYTES) * 100))
-      : 0;
+  // Destructive: wipes every download and its file, so confirm first (same
+  // pattern as the Settings "clear cache" action).
+  const handleClearAll = () => {
+    Alert.alert(
+      `${t("clear")} ${t("all")}`,
+      `${count} · ${formatFileSize(usage.bytes)} ${t("used")}`,
+      [
+        { text: t("cancel"), style: "cancel" },
+        { text: t("clear"), style: "destructive", onPress: () => void doClearAll() },
+      ],
+    );
+  };
 
   return (
     <Screen>
@@ -186,10 +205,18 @@ export default function DownloadsScreen() {
             const pct = progress[item.episodeId];
             const busy = pct !== undefined || isDownloading(item.episodeId);
             const downloadedAt = formatDownloadedAt(item.downloadedAt);
+            // Web parity (minbar/src/pages/Downloads.tsx:40-42): the row of the
+            // episode that is currently playing is highlighted.
+            const isNowPlaying = nowPlayingId === item.episodeId;
             return (
               <View
                 key={item.episodeId}
-                className="flex-row items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-800/40"
+                className={cn(
+                  "flex-row items-center gap-3 rounded-2xl border p-3",
+                  isNowPlaying
+                    ? "border-primary/40 bg-primary/5 dark:border-primary/30 dark:bg-primary/5"
+                    : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-800/40",
+                )}
               >
                 <Artwork uri={item.artworkUrl} size={54} />
                 <View className="flex-1">
@@ -215,9 +242,23 @@ export default function DownloadsScreen() {
                   </Pressable>
                 ) : (
                   <View className="flex-row items-center gap-3">
-                    <Pressable onPress={() => playDownload(item)} hitSlop={8}>
-                      <View className="h-9 w-9 items-center justify-center rounded-full bg-primary">
-                        <Play size={16} color="#0f172a" fill="#0f172a" />
+                    <Pressable
+                      onPress={() => (isNowPlaying ? void togglePlay() : playDownload(item))}
+                      hitSlop={8}
+                    >
+                      <View
+                        className={cn(
+                          "h-9 w-9 items-center justify-center rounded-full",
+                          isNowPlaying
+                            ? "bg-slate-800 dark:bg-slate-700"
+                            : "bg-primary",
+                        )}
+                      >
+                        {isNowPlaying ? (
+                          <Pause size={16} color="#d4a853" fill="#d4a853" />
+                        ) : (
+                          <Play size={16} color="#0f172a" fill="#0f172a" />
+                        )}
                       </View>
                     </Pressable>
                     <Pressable onPress={() => handleDelete(item)} hitSlop={8}>
