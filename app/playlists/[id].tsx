@@ -1,9 +1,10 @@
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { CircleAlert, ListMusic, Play, Trash2 } from "lucide-react-native";
+import { CircleAlert, ListMusic, Play, Share2, Trash2 } from "lucide-react-native";
 
 import { Screen } from "@/components/Screen";
+import { ShareSheet } from "@/components/ShareSheet";
 import { BackHeader } from "@/components/ui/BackHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { EpisodeRow } from "@/components/ui/EpisodeRow";
@@ -11,6 +12,7 @@ import { usePlayer } from "@/context/PlayerContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getPlaylistItems, getPlaylists, removePlaylistItem } from "@/lib/db";
 import { getEpisodeById } from "@/lib/appwrite";
+import { playlistTarget } from "@/lib/share";
 import type { CurrentTrack, Episode, Playlist, PlaylistItem } from "@/types";
 
 interface PlaylistRow {
@@ -27,6 +29,7 @@ export default function PlaylistDetailScreen() {
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [rows, setRows] = useState<PlaylistRow[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -84,15 +87,27 @@ export default function PlaylistDetailScreen() {
       <BackHeader
         title={playlist?.name ?? t("myPlaylist")}
         right={
-          playable.length > 0 && !loading ? (
-            <Pressable
-              onPress={handlePlayAll}
-              className="flex-row items-center gap-1.5 rounded-full bg-primary px-3.5 py-2"
-            >
-              <Play size={14} color="#0f172a" fill="#0f172a" />
-              <Text className="text-xs font-bold text-slate-900">{t("play")}</Text>
-            </Pressable>
-          ) : undefined
+          <View className="flex-row items-center gap-2">
+            {playlist ? (
+              <Pressable
+                onPress={() => setShareOpen(true)}
+                hitSlop={8}
+                accessibilityLabel={t("share")}
+                className="h-9 w-9 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800"
+              >
+                <Share2 size={16} color="#64748b" />
+              </Pressable>
+            ) : null}
+            {playable.length > 0 && !loading ? (
+              <Pressable
+                onPress={handlePlayAll}
+                className="flex-row items-center gap-1.5 rounded-full bg-primary px-3.5 py-2"
+              >
+                <Play size={14} color="#0f172a" fill="#0f172a" />
+                <Text className="text-xs font-bold text-slate-900">{t("play")}</Text>
+              </Pressable>
+            ) : null}
+          </View>
         }
       />
 
@@ -145,6 +160,12 @@ export default function PlaylistDetailScreen() {
       ) : (
         <EmptyState title={t("noEpisodesInPlaylist")} icon={ListMusic} />
       )}
+
+      <ShareSheet
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        target={playlist ? playlistTarget(playlist.name) : null}
+      />
     </Screen>
   );
 }
