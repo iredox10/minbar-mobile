@@ -8,18 +8,40 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { EpisodeRow } from "@/components/ui/EpisodeRow";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "@/hooks/useTranslation";
-import { getLatestEpisodes } from "@/lib/appwrite";
+import { getLatestEpisodes, getSeriesById } from "@/lib/appwrite";
+import type { Episode, Series } from "@/types";
+
+async function loadLatestEpisodes(): Promise<{ episodes: Episode[]; seriesMap: Record<string, Series> }> {
+  const episodes = await getLatestEpisodes(100);
+  const seriesIds = [...new Set(episodes.map((e) => e.seriesId).filter(Boolean))] as string[];
+  const seriesMap: Record<string, Series> = {};
+  await Promise.all(
+    seriesIds.map(async (id) => {
+      try {
+        const series = await getSeriesById(id);
+        if (series) seriesMap[id] = series;
+      } catch {
+        // Series lookup is best-effort; rows still render without artwork.
+      }
+    }),
+  );
+  return { episodes, seriesMap };
+}
 
 export default function LatestEpisodesScreen() {
   const { t } = useTranslation();
-  const { data, loading, error } = useAsyncData(() => getLatestEpisodes(30), []);
+  const { data, loading, error } = useAsyncData(loadLatestEpisodes, []);
   const [searchQuery, setSearchQuery] = useState("");
 
+  const episodes = data?.episodes;
+  const seriesMap = data?.seriesMap;
+
   const filtered = useMemo(() => {
+    const list = episodes ?? [];
     const q = searchQuery.trim().toLowerCase();
-    if (q === "") return data ?? [];
-    return (data ?? []).filter((e) => e.title.toLowerCase().includes(q));
-  }, [data, searchQuery]);
+    if (q === "") return list;
+    return list.filter((e) => e.title.toLowerCase().includes(q));
+  }, [episodes, searchQuery]);
 
   return (
     <Screen>
@@ -51,9 +73,17 @@ export default function LatestEpisodesScreen() {
         <EmptyState title={t("noEpisodesFound")} />
       ) : filtered.length > 0 ? (
         <View className="gap-2.5">
-          {filtered.map((episode) => (
-            <EpisodeRow key={episode.$id} episode={episode} />
-          ))}
+          {filtered.map((episode) => {
+            const series = episode.seriesId ? seriesMap?.[episode.seriesId] : undefined;
+            return (
+              <EpisodeRow
+                key={episode.$id}
+                episode={episode}
+                artworkUrl={series?.artworkUrl}
+                speakerName={series?.title}
+              />
+            );
+          })}
         </View>
       ) : (
         <EmptyState

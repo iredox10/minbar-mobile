@@ -20,17 +20,68 @@ import { getAllDuas } from "@/lib/appwrite";
 import { addFavorite, getFavorites, removeFavorite } from "@/lib/db";
 import { trackDuaView, trackFavoriteAdd } from "@/lib/analytics";
 import type { Dua, DuaCategory } from "@/types";
+import type { TranslationKey } from "@/lib/i18n";
 
-const CATEGORY_ORDER: (DuaCategory | "all")[] = [
-  "all",
-  "morning",
-  "evening",
-  "sleep",
-  "travel",
-  "eating",
-  "prophetic",
-  "quranic",
-  "general",
+const CATEGORIES: {
+  id: DuaCategory | "all";
+  labelKey: TranslationKey;
+  icon: string;
+  gradient: string;
+}[] = [
+  {
+    id: "all",
+    labelKey: "categoryAll",
+    icon: "🗂️",
+    gradient: "from-slate-500/20 to-gray-500/20",
+  },
+  {
+    id: "morning",
+    labelKey: "categoryMorning",
+    icon: "🌅",
+    gradient: "from-yellow-500/20 to-amber-500/20",
+  },
+  {
+    id: "evening",
+    labelKey: "categoryEvening",
+    icon: "🌙",
+    gradient: "from-indigo-500/20 to-purple-500/20",
+  },
+  {
+    id: "sleep",
+    labelKey: "categorySleep",
+    icon: "💫",
+    gradient: "from-violet-500/20 to-purple-500/20",
+  },
+  {
+    id: "travel",
+    labelKey: "categoryTravel",
+    icon: "✈️",
+    gradient: "from-sky-500/20 to-blue-500/20",
+  },
+  {
+    id: "eating",
+    labelKey: "categoryEating",
+    icon: "🍽️",
+    gradient: "from-rose-500/20 to-pink-500/20",
+  },
+  {
+    id: "prophetic",
+    labelKey: "categoryProphetic",
+    icon: "📖",
+    gradient: "from-amber-500/20 to-orange-500/20",
+  },
+  {
+    id: "quranic",
+    labelKey: "categoryQuranic",
+    icon: "📿",
+    gradient: "from-emerald-500/20 to-teal-500/20",
+  },
+  {
+    id: "general",
+    labelKey: "categoryGeneral",
+    icon: "🤲",
+    gradient: "from-slate-500/20 to-gray-500/20",
+  },
 ];
 
 export default function DuasScreen() {
@@ -118,29 +169,6 @@ export default function DuasScreen() {
     return () => clearTimeout(timer);
   }, [focusId, data]);
 
-  const categoryLabel = (c: DuaCategory | "all") => {
-    switch (c) {
-      case "all":
-        return t("categoryAll");
-      case "prophetic":
-        return t("categoryProphetic");
-      case "quranic":
-        return t("categoryQuranic");
-      case "morning":
-        return t("categoryMorning");
-      case "evening":
-        return t("categoryEvening");
-      case "sleep":
-        return t("categorySleep");
-      case "travel":
-        return t("categoryTravel");
-      case "eating":
-        return t("categoryEating");
-      default:
-        return t("categoryGeneral");
-    }
-  };
-
   const toggle = (dua: Dua) => {
     const isExpanded = expanded.has(dua.$id);
     setExpanded((prev) => {
@@ -215,16 +243,25 @@ export default function DuasScreen() {
           className="mb-3 -mx-4 px-4"
           contentContainerClassName="gap-2"
         >
-          {CATEGORY_ORDER.map((c) => {
-            const selected = c === category;
+          {CATEGORIES.map((cat) => {
+            const selected = cat.id === category;
             return (
               <Pressable
-                key={c}
-                onPress={() => setCategory(c)}
-                className={`rounded-full px-4 py-2 ${selected ? "bg-primary" : "border border-slate-300 dark:border-slate-700"}`}
+                key={cat.id}
+                onPress={() => setCategory(cat.id)}
+                className={`flex-row items-center gap-1.5 rounded-full px-4 py-2 ${
+                  selected
+                    ? "bg-primary"
+                    : `border border-slate-300 bg-gradient-to-r ${cat.gradient} dark:border-slate-700`
+                }`}
               >
-                <Text className={`text-sm ${selected ? "font-semibold text-slate-900" : "text-slate-600 dark:text-slate-300"}`}>
-                  {categoryLabel(c)}
+                <Text className="text-sm">{cat.icon}</Text>
+                <Text
+                  className={`text-sm ${
+                    selected ? "font-semibold text-slate-900" : "text-slate-600 dark:text-slate-300"
+                  }`}
+                >
+                  {t(cat.labelKey)}
                 </Text>
               </Pressable>
             );

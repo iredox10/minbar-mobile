@@ -1,11 +1,11 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Pause, Play } from "lucide-react-native";
 
 import { Artwork } from "@/components/Artwork";
 import { usePlayer } from "@/context/PlayerContext";
-import { formatDuration } from "@/lib/utils";
+import { formatDate, formatDuration } from "@/lib/utils";
 import type { Episode } from "@/types";
 
 interface EpisodeRowProps {
@@ -34,6 +34,12 @@ export function EpisodeRow({
 
   const isCurrentTrack = track?.id === episode.$id;
   const playing = isPlayingProp ?? (isCurrentTrack && playerIsPlaying);
+
+  const publishedAt = useMemo(() => {
+    if (!episode.publishedAt) return null;
+    const parsed = new Date(episode.publishedAt);
+    return Number.isNaN(parsed.getTime()) ? null : formatDate(episode.publishedAt);
+  }, [episode.publishedAt]);
 
   const handlePress = () => {
     onPress?.(episode);
@@ -82,6 +88,14 @@ export function EpisodeRow({
             <Text className="text-xs text-slate-400 dark:text-slate-500">
               {formatDuration(episode.duration)}
             </Text>
+          ) : null}
+          {publishedAt ? (
+            <>
+              <View className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
+              <Text className="text-xs text-slate-400 dark:text-slate-500">
+                {publishedAt}
+              </Text>
+            </>
           ) : null}
         </View>
       </View>

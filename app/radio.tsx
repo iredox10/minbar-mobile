@@ -25,13 +25,6 @@ import type { RadioStation } from "@/types";
 
 const LIKES_KEY = "arewa-radio-likes";
 
-interface OptionalVolumeControls {
-  volume?: number;
-  isMuted?: boolean;
-  setVolume?: (v: number) => void;
-  toggleMute?: () => Promise<void> | void;
-}
-
 async function loadLikes(): Promise<Set<string>> {
   try {
     const raw = await AsyncStorage.getItem(LIKES_KEY);
@@ -46,8 +39,16 @@ async function loadLikes(): Promise<Set<string>> {
 export default function RadioScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const player = usePlayer() as ReturnType<typeof usePlayer> & OptionalVolumeControls;
-  const { track, isPlaying, playTrackImmediately, togglePlay } = player;
+  const {
+    track,
+    isPlaying,
+    playTrackImmediately,
+    togglePlay,
+    volume,
+    isMuted,
+    setVolume,
+    toggleMute,
+  } = usePlayer();
   const { data, loading, error } = useAsyncData(getRadioStations, []);
   const [liked, setLiked] = useState<Set<string>>(new Set());
   const [trackWidth, setTrackWidth] = useState(0);
@@ -88,17 +89,7 @@ export default function RadioScreen() {
     router.push("/player");
   };
 
-  // Volume/mute is optional — PlayerContext on mobile currently exposes no
-  // volume API, so skip gracefully when it isn't present (web parity).
-  const hasVolumeControls =
-    typeof player.volume === "number" && typeof player.setVolume === "function";
-  const volume = typeof player.volume === "number" ? player.volume : 1;
-  const isMuted = player.isMuted === true;
-  const canToggleMute = typeof player.toggleMute === "function";
-  const setVolume = player.setVolume;
-  const toggleMute = player.toggleMute;
-  const showVolumeBar =
-    hasVolumeControls && track?.type === "radio" && isPlaying;
+  const showVolumeBar = track?.type === "radio" && isPlaying;
 
   const nowStreaming = track?.type === "radio" && isPlaying && track !== null;
 
@@ -221,32 +212,32 @@ export default function RadioScreen() {
         <EmptyState title={t("noRadioStations")} icon={RadioIcon} />
       )}
 
-      {showVolumeBar && setVolume ? (
+      {showVolumeBar ? (
         <View className="mt-4 rounded-2xl border border-primary/20 bg-white p-4 dark:border-primary/20 dark:bg-slate-800/40">
           <View className="flex-row items-center gap-3">
-            {canToggleMute && toggleMute ? (
-              <Pressable
-                onPress={() => toggleMute()}
-                className="rounded-xl bg-slate-800/20 p-2 active:opacity-70 dark:bg-slate-800"
-              >
-                {isMuted ? (
-                  <VolumeX size={20} color="#94a3b8" />
-                ) : (
-                  <Volume2 size={20} color="#94a3b8" />
-                )}
-              </Pressable>
-            ) : null}
+            <Pressable
+              onPress={() => {
+                toggleMute().catch(() => {});
+              }}
+              className="rounded-xl bg-slate-800/20 p-2 active:opacity-70 dark:bg-slate-800"
+            >
+              {isMuted ? (
+                <VolumeX size={20} color="#94a3b8" />
+              ) : (
+                <Volume2 size={20} color="#94a3b8" />
+              )}
+            </Pressable>
             <View
               className="h-2 flex-1 overflow-hidden rounded-full bg-slate-700/50"
               onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
               onTouchEnd={(e) => {
-                if (trackWidth > 0 && setVolume) {
+                if (trackWidth > 0) {
                   const v = Math.min(
                     1,
                     Math.max(0, e.nativeEvent.locationX / trackWidth),
                   );
-                  setVolume(v);
-                  if (v > 0 && isMuted && toggleMute) toggleMute();
+                  setVolume(v).catch(() => {});
+                  if (v > 0 && isMuted) toggleMute().catch(() => {});
                 }
               }}
             >
