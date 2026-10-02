@@ -1,31 +1,16 @@
-import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Heart, Sparkles } from "lucide-react-native";
 
+import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
-import { getAppSettings } from "@/lib/appwrite";
 
 /** Emerald gradient-style support CTA shown when donations are enabled. */
 export function SupportBanner({ enabled: enabledProp }: { enabled?: boolean }) {
   const { t } = useTranslation();
   const router = useRouter();
-  const [enabled, setEnabled] = useState<boolean | null>(enabledProp ?? null);
-
-  useEffect(() => {
-    if (enabledProp !== undefined) { setEnabled(enabledProp); return; }
-    let active = true;
-    getAppSettings()
-      .then((settings) => {
-        if (active) setEnabled(!!settings?.isDonationsEnabled);
-      })
-      .catch(() => {
-        if (active) setEnabled(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [enabledProp]);
+  const { settings, loading } = useAppSettings();
+  const enabled = enabledProp ?? (loading ? null : settings.isDonationsEnabled);
 
   if (enabled === null || !enabled) return null;
 

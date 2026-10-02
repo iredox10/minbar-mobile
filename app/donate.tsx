@@ -18,13 +18,12 @@ import {
 
 import { Screen } from "@/components/Screen";
 import { BackHeader } from "@/components/ui/BackHeader";
-import { useAsyncData } from "@/hooks/useAsyncData";
+import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
-import { getAppSettings } from "@/lib/appwrite";
 
 export default function DonateScreen() {
   const { t } = useTranslation();
-  const { data: settings, loading } = useAsyncData(getAppSettings, []);
+  const { settings, loading } = useAppSettings();
   const [copied, setCopied] = useState(false);
 
   const open = (url?: string) => {
@@ -58,7 +57,7 @@ export default function DonateScreen() {
     }
   };
 
-  const donationsEnabled = settings?.isDonationsEnabled !== false;
+  const donationsEnabled = settings.isDonationsEnabled;
 
   return (
     <Screen>

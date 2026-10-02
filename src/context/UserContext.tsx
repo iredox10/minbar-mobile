@@ -70,7 +70,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
       const serverFollowing = (prefs as { following?: unknown } | undefined)?.following;
       if (Array.isArray(serverFollowing)) {
         const ids = serverFollowing.filter((id): id is string => typeof id === "string");
-        setFollowing((prev) => Array.from(new Set([...prev, ...ids])));
+        // Server prefs are authoritative (web parity: follows live only in prefs),
+        // so replace — never union — otherwise an unfollow on web is resurrected.
+        setFollowing(ids);
+        AsyncStorage.setItem(FOLLOWING_KEY, JSON.stringify(ids)).catch(() => {});
       }
       // Best-effort library roaming (web parity with minbar sync.ts).
       syncUserData(session.$id).catch(() => {});
@@ -145,6 +148,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error("Logout failed:", error);
     }
+    // Always clear follow state/cache so the next account on a shared device
+    // doesn't inherit this one's follows.
+    setFollowing([]);
+    AsyncStorage.removeItem(FOLLOWING_KEY).catch(() => {});
   }, []);
 
   const updateLanguage = useCallback(

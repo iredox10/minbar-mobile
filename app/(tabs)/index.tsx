@@ -29,13 +29,13 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SupportBanner } from "@/components/SupportBanner";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useAppSettings } from "@/hooks/useAppSettings";
 import { useTranslation } from "@/hooks/useTranslation";
 import { usePlayer } from "@/context/PlayerContext";
 import {
   getFeaturedSeries,
   getFeaturedSpeakers,
   getLatestEpisodes,
-  getAppSettings,
   isAppwriteConfigured,
 } from "@/lib/appwrite";
 import { getInProgressHistory, isDownloaded } from "@/lib/db";
@@ -173,25 +173,14 @@ export default function HomeScreen() {
   const { playTrackImmediately, playEpisode, togglePlay, seek, track: currentTrack, isPlaying } =
     usePlayer();
   const [inProgress, setInProgress] = useState<PlaybackHistory[]>([]);
-  const [donationsEnabled, setDonationsEnabled] = useState(false);
+  const { settings: appSettings, loading: appSettingsLoading } = useAppSettings();
+  const donationsEnabled = !appSettingsLoading && appSettings.isDonationsEnabled;
 
   useFocusEffect(
     useCallback(() => {
       getInProgressHistory(8).then(setInProgress).catch(() => {});
     }, []),
   );
-
-  useEffect(() => {
-    let active = true;
-    getAppSettings()
-      .then((s) => {
-        if (active) setDonationsEnabled(!!s?.isDonationsEnabled);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const featuredSpeakers = useAsyncData(getFeaturedSpeakers, []);
   const featuredSeries = useAsyncData(getFeaturedSeries, []);
