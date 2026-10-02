@@ -54,10 +54,14 @@ import {
 import { getEpisodeLinks } from "@/lib/share";
 import { getProgress, isDownloading, subscribeDownloads, subscribeProgress } from "@/lib/downloads";
 import { trackFavoriteAdd } from "@/lib/analytics";
-import { formatDuration, getPlaybackSpeedLabel } from "@/lib/utils";
+import { formatDuration, getPlaybackSpeedLabel, PLAYBACK_SPEEDS } from "@/lib/utils";
 import type { Bookmark as BookmarkRecord, CurrentTrack, RepeatMode } from "@/types";
 
 const SLEEP_OPTIONS = [5, 10, 15, 30, 45, 60, 90];
+
+/** Match the native lock-screen skip intervals (src/audio/player.ts) and web PlayerPage. */
+const REWIND_SECONDS = 15;
+const FORWARD_SECONDS = 30;
 
 function formatSleepRemaining(totalSeconds: number | null): string {
   if (totalSeconds === null || totalSeconds === undefined || totalSeconds <= 0) return "";
@@ -103,12 +107,14 @@ export default function PlayerScreen() {
     skipNext,
     skipPrevious,
     changeSpeed,
+    setSpeed,
     setVolume,
     toggleMute,
     sleepTimerMinutes,
     sleepRemaining,
     setSleepTimer,
     cancelSleepTimer,
+    stop,
   } = player;
 
   // ── Repeat mode lives in PlayerContext (engine honors off/all/one) ───────
@@ -122,7 +128,7 @@ export default function PlayerScreen() {
   const effectiveVolume = isMuted ? 0 : volume;
 
   // ── Sheets ─────────────────────────────────────────────────────────────────
-  const [sheet, setSheet] = useState<"sleep" | "upnext" | "download" | null>(null);
+  const [sheet, setSheet] = useState<"sleep" | "speed" | "upnext" | "download" | null>(null);
   const [playlistOpen, setPlaylistOpen] = useState(false);
 
   // ── Download status for the current track (web parity: PlayerPage useDownload)
@@ -372,7 +378,14 @@ export default function PlayerScreen() {
     <Screen scroll={false} className="bg-slate-950 dark:bg-slate-950">
       {/* Header */}
       <View className="flex-row items-center justify-between px-2 pb-2 pt-2">
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable
+          onPress={() => {
+            void stop();
+            router.back();
+          }}
+          hitSlop={12}
+          accessibilityLabel={`${t("stop")} and close`}
+        >
           <ChevronDown size={26} color="#94a3b8" />
         </Pressable>
         <Text className="text-sm font-medium text-slate-400">{t("nowPlaying")}</Text>
@@ -529,8 +542,16 @@ export default function PlayerScreen() {
             <Pressable onPress={skipPrevious} hitSlop={10} disabled={!hasPrevious}>
               <SkipBack size={28} color={hasPrevious ? "#e2e8f0" : "#475569"} />
             </Pressable>
-            <Pressable onPress={() => seek(position - 30)} hitSlop={10}>
+            <Pressable
+              onPress={() => seek(Math.max(0, position - REWIND_SECONDS))}
+              hitSlop={10}
+              accessibilityLabel="Rewind 15 seconds"
+              className="relative h-9 w-9 items-center justify-center"
+            >
               <RotateCcw size={26} color="#cbd5e1" />
+              <Text className="absolute inset-0 pt-0.5 text-center text-[9px] font-bold text-slate-300">
+                {REWIND_SECONDS}
+              </Text>
             </Pressable>
             <Pressable
               onPress={togglePlay}
@@ -544,8 +565,16 @@ export default function PlayerScreen() {
                 <Play size={28} color="#0f172a" fill="#0f172a" />
               )}
             </Pressable>
-            <Pressable onPress={() => seek(position + 30)} hitSlop={10}>
+            <Pressable
+              onPress={() => seek(Math.min(duration, position + FORWARD_SECONDS))}
+              hitSlop={10}
+              accessibilityLabel="Skip forward 30 seconds"
+              className="relative h-9 w-9 items-center justify-center"
+            >
               <RotateCw size={26} color="#cbd5e1" />
+              <Text className="absolute inset-0 pt-0.5 text-center text-[9px] font-bold text-slate-300">
+                {FORWARD_SECONDS}
+              </Text>
             </Pressable>
             <Pressable onPress={skipNext} hitSlop={10} disabled={!hasNext}>
               <SkipForward size={28} color={hasNext ? "#e2e8f0" : "#475569"} />
@@ -638,7 +667,9 @@ export default function PlayerScreen() {
           {!isLive ? (
             <View className="mt-4 flex-row justify-center gap-2">
               <Pressable
-                onPress={changeSpeed}
+                onPress={() => setSheet("speed")}
+                onLongPress={() => void changeSpeed()}
+                accessibilityLabel={t("playbackSpeed")}
                 className="flex-row items-center gap-2 rounded-full border border-slate-700 px-4 py-2"
               >
                 <Gauge size={16} color="#d4a853" />
@@ -657,6 +688,50 @@ export default function PlayerScreen() {
           ) : null}
         </ScrollView>
       )}
+
+      {/* ── Speed sheet: all PLAYBACK_SPEEDS (web parity: PlayerPage SpeedSheet) ── */}
+      <Modal visible={sheet === "speed"} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
+        <Pressable className="flex-1 justify-end bg-black/50" onPress={() => setSheet(null)}>
+          <Pressable
+            className="rounded-t-3xl border-t border-slate-700/60 bg-slate-900 p-6"
+            onPress={(e) => e.stopPropagation?.()}
+          >
+            <View className="mx-auto mb-5 h-1 w-10 rounded-full bg-slate-600" />
+            <View className="mb-5 flex-row items-center justify-between">
+              <View className="flex-row items-center gap-2">
+                <Gauge size={18} color="#d4a853" />
+                <Text className="font-semibold text-slate-100">{t("playbackSpeed")}</Text>
+              </View>
+              <Pressable onPress={() => setSheet(null)} className="rounded-xl bg-slate-800 p-2" hitSlop={8}>
+                <X size={16} color="#94a3b8" />
+              </Pressable>
+            </View>
+            <View className="flex-row flex-wrap gap-2.5">
+              {PLAYBACK_SPEEDS.map((s) => (
+                <Pressable
+                  key={s}
+                  onPress={() => {
+                    void setSpeed(s);
+                    setSheet(null);
+                  }}
+                  accessibilityLabel={getPlaybackSpeedLabel(s)}
+                  className={`min-w-[22%] flex-1 rounded-xl py-3 ${
+                    rate === s ? "bg-primary/30" : "bg-slate-800"
+                  }`}
+                >
+                  <Text
+                    className={`text-center text-sm font-medium ${
+                      rate === s ? "text-primary" : "text-slate-300"
+                    }`}
+                  >
+                    {getPlaybackSpeedLabel(s)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* ── Sleep sheet: 5,10,15,30,45,60,90 + cancel, remaining mm:ss ── */}
       <Modal visible={sheet === "sleep"} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
