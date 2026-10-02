@@ -28,6 +28,18 @@ async function read<T>(store: string, fallback: T): Promise<T> {
   }
 }
 
+/**
+ * Allocate the next auto-increment id for a collection.
+ *
+ * The naive `(all.length ? all[all.length - 1].id : 0) + 1` pattern assumes the
+ * array is ascending-by-id *and* gap-free. Removals use `.filter()`, so after
+ * deleting the highest-id row the next insert could collide with an existing id.
+ * Taking the max keeps ids unique regardless of ordering or gaps.
+ */
+function nextId(all: { id?: number }[]): number {
+  return Math.max(0, ...all.map((row) => row.id ?? 0)) + 1;
+}
+
 async function write<T>(store: string, value: T): Promise<void> {
   await AsyncStorage.setItem(key(store), JSON.stringify(value));
 }
@@ -38,7 +50,7 @@ export async function addFavorite(favorite: Omit<Favorite, "id">): Promise<numbe
   const all = await read<Favorite[]>("favorites", []);
   const existing = all.find((f) => f.type === favorite.type && f.itemId === favorite.itemId);
   if (existing) return existing.id ?? 1;
-  const next: Favorite = { ...favorite, id: (all.length ? all[all.length - 1].id ?? 0 : 0) + 1 };
+  const next: Favorite = { ...favorite, id: nextId(all) };
   await write("favorites", [...all, next]);
   return next.id!;
 }
@@ -172,7 +184,7 @@ export async function deleteHistoryEntry(episodeId: string): Promise<void> {
 
 export async function addBookmark(bookmark: Omit<Bookmark, "id">): Promise<number> {
   const all = await read<Bookmark[]>("bookmarks", []);
-  const id = (all.length ? all[all.length - 1].id ?? 0 : 0) + 1;
+  const id = nextId(all);
   await write("bookmarks", [...all, { ...bookmark, id }]);
   return id;
 }
@@ -201,7 +213,7 @@ export async function addDownload(record: Omit<DownloadedEpisode, "id">): Promis
   if (existing) return existing.id ?? 1;
   const next: DownloadedEpisode = {
     ...record,
-    id: (all.length ? all[all.length - 1].id ?? 0 : 0) + 1,
+    id: nextId(all),
   };
   await write("downloads", [...all, next]);
   return next.id!;
@@ -232,7 +244,7 @@ export async function createPlaylist(name: string, description?: string): Promis
   const all = await read<Playlist[]>("playlists", []);
   const now = new Date();
   const next: Playlist = {
-    id: (all.length ? all[all.length - 1].id ?? 0 : 0) + 1,
+    id: nextId(all),
     name,
     description,
     createdAt: now,
@@ -242,12 +254,24 @@ export async function createPlaylist(name: string, description?: string): Promis
   return next.id!;
 }
 
-export async function renamePlaylist(id: number, name: string): Promise<void> {
+/**
+ * Update mutable playlist fields (web parity: minbar `updatePlaylist`).
+ * Fields left `undefined` are preserved, so `description` survives a rename.
+ */
+export async function updatePlaylist(
+  id: number,
+  updates: { name?: string; description?: string },
+): Promise<void> {
   const all = await read<Playlist[]>("playlists", []);
   await write(
     "playlists",
-    all.map((p) => (p.id === id ? { ...p, name, updatedAt: new Date() } : p)),
+    all.map((p) => (p.id === id ? { ...p, ...updates, updatedAt: new Date() } : p)),
   );
+}
+
+/** Name-only convenience wrapper kept for existing call sites. */
+export async function renamePlaylist(id: number, name: string): Promise<void> {
+  await updatePlaylist(id, { name });
 }
 
 export async function deletePlaylist(id: number): Promise<void> {
@@ -288,7 +312,7 @@ export async function addPlaylistItem(playlistId: number, episodeId: string): Pr
   const all = await read<PlaylistItem[]>("playlist-items", []);
   if (all.some((i) => i.playlistId === playlistId && i.episodeId === episodeId)) return;
   const next: PlaylistItem = {
-    id: (all.length ? all[all.length - 1].id ?? 0 : 0) + 1,
+    id: nextId(all),
     playlistId,
     episodeId,
     addedAt: new Date(),

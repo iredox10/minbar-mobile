@@ -12,7 +12,7 @@ import {
   deletePlaylist,
   getPlaylistItemCounts,
   getPlaylists,
-  renamePlaylist,
+  updatePlaylist,
 } from "@/lib/db";
 import { formatRelativeDate } from "@/lib/utils";
 import type { Playlist } from "@/types";
@@ -25,6 +25,7 @@ export default function PlaylistsScreen() {
   const [newName, setNewName] = useState("");
   const [editing, setEditing] = useState<Playlist | null>(null);
   const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
 
   const reload = useCallback(async () => {
     const [pls, cnts] = await Promise.all([getPlaylists(), getPlaylistItemCounts()]);
@@ -54,14 +55,17 @@ export default function PlaylistsScreen() {
   const openRename = (p: Playlist) => {
     setEditing(p);
     setEditName(p.name);
+    setEditDescription(p.description ?? "");
   };
 
   const handleRename = async () => {
     const name = editName.trim();
     if (!editing?.id || !name) return;
-    await renamePlaylist(editing.id, name);
+    const description = editDescription.trim();
+    await updatePlaylist(editing.id, { name, description: description || undefined });
     setEditing(null);
     setEditName("");
+    setEditDescription("");
     reload();
   };
 
@@ -150,6 +154,17 @@ export default function PlaylistsScreen() {
               value={editName}
               onChangeText={setEditName}
               autoFocus
+              returnKeyType="next"
+              onSubmitEditing={() => undefined}
+            />
+            <Text className="mb-1 mt-3 text-sm text-slate-500">{t("addDescription")}</Text>
+            <TextInput
+              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-[15px] text-slate-900 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-100"
+              placeholder={t("descriptionOpt")}
+              placeholderTextColor="#94a3b8"
+              value={editDescription}
+              onChangeText={setEditDescription}
+              multiline
               returnKeyType="done"
               onSubmitEditing={handleRename}
             />

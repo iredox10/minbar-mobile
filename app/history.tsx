@@ -1,27 +1,76 @@
 import { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
-import { CheckCircle2, History as HistoryIcon, Play, Trash2 } from "lucide-react-native";
+import { CheckCircle2, History as HistoryIcon, Play, Share2, Trash2 } from "lucide-react-native";
 
 import { Screen } from "@/components/Screen";
 import { BackHeader } from "@/components/ui/BackHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Artwork } from "@/components/Artwork";
+import { ShareSheet } from "@/components/ShareSheet";
 import { usePlayer } from "@/context/PlayerContext";
 import { useTranslation } from "@/hooks/useTranslation";
+import { getEpisodeById, isAppwriteConfigured } from "@/lib/appwrite";
 import { clearHistory, deleteHistoryEntry, getRecentHistory } from "@/lib/db";
+import { episodeTarget, type ShareTarget } from "@/lib/share";
 import { formatDuration, formatRelativeDate } from "@/lib/utils";
 import type { PlaybackHistory } from "@/types";
+
+/** History row enriched with live Appwrite episode data (web parity with History.tsx). */
+interface HistoryItem extends PlaybackHistory {
+  episodeTitle?: string;
+  episodeNumber?: number;
+}
 
 export default function HistoryScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { playTrackImmediately, seek } = usePlayer();
-  const [items, setItems] = useState<PlaybackHistory[] | null>(null);
+  const [items, setItems] = useState<HistoryItem[] | null>(null);
+  const [shareTargetItem, setShareTargetItem] = useState<ShareTarget | null>(null);
 
   const reload = useCallback(async () => {
-    setItems(await getRecentHistory(50));
+    const raw = await getRecentHistory(50);
+    // History rows cache title/speaker at play time; fill any title gaps from
+    // Appwrite when it is reachable (web History.tsx enriches the same way).
+    if (!isAppwriteConfigured()) {
+      setItems(raw);
+      return;
+    }
+    try {
+      const enriched = await Promise.all(
+        raw.map(async (h): Promise<HistoryItem> => {
+          if (h.title) return h;
+          const episode = await getEpisodeById(h.episodeId);
+          if (!episode) return h;
+          return {
+            ...h,
+            episodeTitle: episode.title,
+            episodeNumber: episode.episodeNumber,
+          };
+        }),
+      );
+      setItems(enriched);
+    } catch {
+      // Offline / Appwrite failure → fall back to cached history rows.
+      setItems(raw);
+    }
   }, []);
+
+  const displayTitle = (item: HistoryItem) => item.episodeTitle ?? item.title ?? item.episodeId;
+  const share = (item: HistoryItem) => {
+    setShareTargetItem(
+      episodeTarget(
+        {
+          $id: item.episodeId,
+          title: displayTitle(item),
+          episodeNumber: item.episodeNumber,
+        },
+        item.speaker,
+        { artworkUri: item.artworkUrl },
+      ),
+    );
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -105,7 +154,7 @@ export default function HistoryScreen() {
                         numberOfLines={2}
                         className="text-[15px] font-semibold leading-snug text-slate-900 dark:text-slate-100"
                       >
-                        {item.title ?? item.episodeId}
+                        {displayTitle(item)}
                       </Text>
                       <Text className="mt-0.5 text-xs text-slate-400">
                         {item.speaker ? `${item.speaker} · ` : ""}
@@ -125,6 +174,9 @@ export default function HistoryScreen() {
                       )}
                     </View>
                   </Pressable>
+                  <Pressable onPress={() => share(item)} hitSlop={8} accessibilityLabel={t("share")}>
+                    <Share2 size={17} color="#94a3b8" />
+                  </Pressable>
                   <Pressable onPress={() => handleDeleteRow(item.episodeId)} hitSlop={8} accessibilityLabel="Delete history entry">
                     <Trash2 size={18} color="#f87171" />
                   </Pressable>
@@ -139,6 +191,12 @@ export default function HistoryScreen() {
           })}
         </View>
       )}
+
+      <ShareSheet
+        visible={shareTargetItem !== null}
+        onClose={() => setShareTargetItem(null)}
+        target={shareTargetItem}
+      />
     </Screen>
   );
 }
