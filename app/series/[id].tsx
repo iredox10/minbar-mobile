@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   Share,
@@ -8,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Check, Download, Heart, Layers, Play, Share2 } from "lucide-react-native";
+import { Check, Download, Heart, Layers, ListChecks, Play, Share2 } from "lucide-react-native";
 
 import { Screen } from "@/components/Screen";
 import { BackHeader } from "@/components/ui/BackHeader";
@@ -16,6 +17,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { SeriesCard } from "@/components/ui/SeriesCard";
 import { Artwork } from "@/components/Artwork";
+import { SeriesDownloadSheet } from "@/components/SeriesDownloadSheet";
+import { ShareSheet } from "@/components/ShareSheet";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
@@ -33,10 +36,22 @@ import {
   subscribeDownloads,
   subscribeProgress,
 } from "@/lib/downloads";
+import { seriesTarget } from "@/lib/share";
 import { formatDate, formatDuration } from "@/lib/utils";
 import { usePlayer } from "@/context/PlayerContext";
 import { trackFavoriteAdd } from "@/lib/analytics";
+import type { TranslationKey } from "@/lib/i18n";
 import type { CurrentTrack, Episode } from "@/types";
+
+/** Turn a downloads.ts error (wifi/offline gate codes or a raw message) into UI text. */
+function errorMessage(err: unknown, t: (key: TranslationKey) => string): string {
+  const code = (err as Error & { code?: string })?.code;
+  if (code === "DOWNLOAD_WIFI") return t("wifiOnly");
+  if (code === "DOWNLOAD_OFFLINE") return t("offline");
+  const message = err instanceof Error ? err.message : "";
+  if (message && message !== "wifi" && message !== "offline") return message;
+  return t("downloadFailed");
+}
 
 function SeriesEpisodeRow({
   episode,
@@ -53,6 +68,7 @@ function SeriesEpisodeRow({
   seriesId: string;
   onPlay: (episode: Episode, index: number) => void;
 }) {
+  const { t } = useTranslation();
   const [downloaded, setDownloaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | undefined>(() =>
@@ -83,18 +99,25 @@ function SeriesEpisodeRow({
 
   const toggleDownload = () => {
     if (busy) {
-      deleteDownloaded(episode.$id).catch(() => {});
+      deleteDownloaded(episode.$id).catch((err) =>
+        Alert.alert(t("download"), `${t("downloadFailed")}\n${errorMessage(err, t)}`),
+      );
       return;
     }
     if (downloaded) {
-      deleteDownloaded(episode.$id).catch(() => {});
+      deleteDownloaded(episode.$id).catch((err) =>
+        Alert.alert(t("download"), `${t("downloadFailed")}\n${errorMessage(err, t)}`),
+      );
       return;
     }
     setBusy(true);
     setProgress(0);
     downloadEpisode(episode, { seriesId, artworkUrl, speaker: speakerName })
       .then(() => setDownloaded(true))
-      .catch(() => {})
+      .catch((err) => {
+        // Never swallow: wifi/offline gates need actionable UI.
+        Alert.alert(t("download"), errorMessage(err, t));
+      })
       .finally(() => {
         setBusy(isDownloading(episode.$id));
         setProgress(getProgress(episode.$id));
@@ -181,6 +204,8 @@ export default function SeriesDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { playEpisode } = usePlayer();
   const [favorite, setFavorite] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
 
   const series = useAsyncData(() => getSeriesById(id ?? ""), [id]);
   const seriesId = series.data?.$id ?? "";
@@ -295,26 +320,44 @@ export default function SeriesDetailScreen() {
                   {series.data.description}
                 </Text>
               ) : null}
-              <Pressable
-                onPress={toggleFavorite}
-                className="mt-3 flex-row items-center gap-1.5 self-start rounded-full border border-slate-200 px-3 py-1.5 dark:border-slate-700"
-              >
-                <Heart size={14} color={favorite ? "#f87171" : "#94a3b8"} fill={favorite ? "#f87171" : "transparent"} />
-                <Text className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                  {favorite ? t("favorited") : t("favorites")}
-                </Text>
-              </Pressable>
+              <View className="mt-3 flex-row flex-wrap items-center gap-2">
+                <Pressable
+                  onPress={toggleFavorite}
+                  className="flex-row items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 active:opacity-80 dark:border-slate-700"
+                >
+                  <Heart size={14} color={favorite ? "#f87171" : "#94a3b8"} fill={favorite ? "#f87171" : "transparent"} />
+                  <Text className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                    {favorite ? t("favorited") : t("favorites")}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setShareOpen(true)}
+                  accessibilityLabel={t("share")}
+                  className="h-8 w-8 items-center justify-center rounded-full border border-slate-200 active:opacity-80 dark:border-slate-700"
+                >
+                  <Share2 size={14} color="#94a3b8" />
+                </Pressable>
+              </View>
             </View>
           </View>
 
           {episodeList.length > 0 ? (
-            <Pressable
-              onPress={handlePlayAll}
-              className="mb-4 flex-row items-center justify-center gap-2 rounded-2xl bg-primary py-3.5 active:opacity-90"
-            >
-              <Play size={18} color="#0f172a" fill="#0f172a" />
-              <Text className="text-[15px] font-semibold text-slate-900">{t("playAll")}</Text>
-            </Pressable>
+            <View className="mb-4 flex-row gap-2.5">
+              <Pressable
+                onPress={handlePlayAll}
+                className="flex-1 flex-row items-center justify-center gap-2 rounded-2xl bg-primary py-3.5 active:opacity-90"
+              >
+                <Play size={18} color="#0f172a" fill="#0f172a" />
+                <Text className="text-[15px] font-semibold text-slate-900">{t("playAll")}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setDownloadOpen(true)}
+                className="flex-1 flex-row items-center justify-center gap-2 rounded-2xl bg-slate-800 py-3.5 active:opacity-80 dark:bg-slate-800/60"
+              >
+                <ListChecks size={18} color="#cbd5e1" />
+                <Text className="text-[15px] font-semibold text-slate-200">{t("downloadAll")}</Text>
+              </Pressable>
+            </View>
           ) : null}
 
           <SectionHeader title={t("episodes")} />
@@ -354,6 +397,24 @@ export default function SeriesDetailScreen() {
           ) : null}
         </>
       )}
+
+      <ShareSheet
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        target={
+          series.data
+            ? seriesTarget(series.data.$id, series.data.title)
+            : null
+        }
+      />
+
+      <SeriesDownloadSheet
+        visible={downloadOpen}
+        series={series.data ?? null}
+        speakerName={speakerName}
+        episodes={episodeList}
+        onClose={() => setDownloadOpen(false)}
+      />
     </Screen>
   );
 }

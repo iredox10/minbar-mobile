@@ -77,17 +77,40 @@ export function getPlaylistLinks(name: string): ShareLinks {
 
 // ─── ShareTarget builders (for ShareSheet) ────────────────────────────────────
 
+/** `m:ss` / `h:mm:ss` label for a share caption (mirrors web's clip caption). */
+function formatTimestamp(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return hours > 0 ? `${hours}:${pad(mins)}:${pad(secs)}` : `${mins}:${pad(secs)}`;
+}
+
 function buildMessage(headline: string, links: ShareLinks): string {
   return `${headline}\n${links.webUrl}\n${links.deepLink}`;
+}
+
+export interface EpisodeTargetOptions {
+  /** Artwork URL for the share card. */
+  artworkUri?: string;
+  /**
+   * Playback position (seconds) to deep-link into. Mirrors web
+   * `buildShareCaption` (`minbar/src/lib/audioClip.ts`), which appends
+   * `?t=<startSec>` to the episode URL so the recipient lands at that point.
+   * Values <= 0 are ignored.
+   */
+  timestampSeconds?: number;
 }
 
 export function episodeTarget(
   episode: Pick<Episode, "$id" | "title"> & { episodeNumber?: number },
   speakerName?: string,
-  opts?: { artworkUri?: string },
+  opts?: EpisodeTargetOptions,
 ): ShareTarget {
-  const links = getEpisodeLinks(episode.$id);
+  const links = getEpisodeLinks(episode.$id, opts?.timestampSeconds);
   const headline = `Listen to "${episode.title}"${speakerName ? ` by ${speakerName}` : ""} on Arewa Central`;
+  const at = links.webUrl.includes("?t=") ? ` from ${formatTimestamp(opts?.timestampSeconds ?? 0)}` : "";
   return {
     kind: "episode",
     title: episode.title,
@@ -95,7 +118,7 @@ export function episodeTarget(
     artworkUri: opts?.artworkUri,
     badge: episode.episodeNumber ? `Episode ${episode.episodeNumber}` : undefined,
     ...links,
-    message: buildMessage(headline, links),
+    message: buildMessage(`${headline}${at}`, links),
   };
 }
 
@@ -148,8 +171,9 @@ export function shareTarget(target: ShareTarget): Promise<ShareResult> {
 export function shareEpisode(
   episode: Pick<Episode, "$id" | "title">,
   speakerName?: string,
+  opts?: { artworkUri?: string; timestampSeconds?: number },
 ): Promise<ShareResult> {
-  return shareTarget(episodeTarget(episode, speakerName));
+  return shareTarget(episodeTarget(episode, speakerName, opts));
 }
 
 export function shareSeries(id: string, title: string): Promise<ShareResult> {
