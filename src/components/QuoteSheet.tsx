@@ -13,10 +13,10 @@ import {
 import { Image as ImageIcon, Quote, X } from "lucide-react-native";
 import { captureRef } from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
-import * as MediaLibrary from "expo-media-library";
 
 import { useTranslation } from "@/hooks/useTranslation";
 import { getEpisodeLinks } from "@/lib/share";
+import { saveImageToLibrary } from "@/lib/saveImage";
 
 interface Props {
   visible: boolean;
@@ -78,13 +78,19 @@ export function QuoteSheet({ visible, episodeId, episodeTitle, speakerName, onCl
     if (!previewUri) return;
     setSaving(true);
     try {
-      const perm = await MediaLibrary.requestPermissionsAsync(true);
-      if (!perm.granted) return;
-      await MediaLibrary.saveToLibraryAsync(previewUri);
-      Alert.alert(t("shareClip"), t("clipDownloaded"));
+      const result = await saveImageToLibrary(previewUri, episodeTitle);
+      if (result === "saved") {
+        Alert.alert(t("shareClip"), t("imageSaved"));
+      } else if (result === "shared") {
+        Alert.alert(t("shareClip"), t("imageSavedViaShare"));
+      } else if (result === "permission-denied") {
+        Alert.alert(t("shareClip"), t("savePermissionDenied"));
+      } else {
+        Alert.alert(t("shareClip"), t("saveUnavailable"));
+      }
     } catch (error) {
       console.error("Failed to save quote card:", error);
-      Alert.alert(t("shareClip"), t("downloadFailed"));
+      Alert.alert(t("shareClip"), t("saveUnavailable"));
     } finally {
       setSaving(false);
     }

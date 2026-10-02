@@ -13,10 +13,10 @@ import {
 import { Check, Copy, Image as ImageIcon, QrCode, Share2, X } from "lucide-react-native";
 import { captureRef } from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
-import * as MediaLibrary from "expo-media-library";
 
 import { useTranslation } from "@/hooks/useTranslation";
 import { copyLink, type ShareTarget } from "@/lib/share";
+import { saveImageToLibrary } from "@/lib/saveImage";
 import { ShareCard } from "./ShareCard";
 
 interface Props {
@@ -107,16 +107,19 @@ export function ShareSheet({ visible, target, onClose, onShared }: Props) {
     if (!previewUri) return;
     setSaving(true);
     try {
-      const perm = await MediaLibrary.requestPermissionsAsync(true);
-      if (!perm.granted) {
-        Alert.alert(t("share"), t("copyFailed"));
-        return;
+      const result = await saveImageToLibrary(previewUri, target.title);
+      if (result === "saved") {
+        Alert.alert(t("share"), t("imageSaved"));
+      } else if (result === "shared") {
+        Alert.alert(t("share"), t("imageSavedViaShare"));
+      } else if (result === "permission-denied") {
+        Alert.alert(t("share"), t("savePermissionDenied"));
+      } else {
+        Alert.alert(t("share"), t("saveUnavailable"));
       }
-      await MediaLibrary.saveToLibraryAsync(previewUri);
-      Alert.alert(t("share"), t("clipDownloaded"));
     } catch (error) {
       console.error("Failed to save share card:", error);
-      Alert.alert(t("share"), t("downloadFailed"));
+      Alert.alert(t("share"), t("saveUnavailable"));
     } finally {
       setSaving(false);
     }
