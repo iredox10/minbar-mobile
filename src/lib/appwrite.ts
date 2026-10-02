@@ -1,4 +1,4 @@
-import { Client, Databases, Storage, Query, Account } from "appwrite";
+import { Client, Databases, Storage, Query, Account, ID } from "appwrite";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type {
   Speaker,
@@ -341,22 +341,31 @@ interface SavedPlaybackState {
   updatedAt: string;
 }
 
-export async function savePlaybackState(
-  track: {
-    id: string;
-    title: string;
-    audioUrl: string;
-    artworkUrl?: string;
-    speaker?: string;
-    duration: number;
-    type: "episode" | "radio" | "dua";
-    seriesId?: string;
-    episodeNumber?: number;
-  },
+type CloudTrack = {
+  id: string;
+  title: string;
+  audioUrl: string;
+  artworkUrl?: string;
+  speaker?: string;
+  duration: number;
+  type: "episode" | "radio" | "dua";
+  seriesId?: string;
+  episodeNumber?: number;
+};
+
+/**
+ * Upsert the device-keyed playback doc.
+ *
+ * Returns whether the row actually reached Appwrite — the local-first mirror
+ * in `db.ts` uses this to decide between `synced: true` and a pending drain,
+ * so failures must surface here rather than being logged and swallowed.
+ */
+async function upsertPlaybackState(
+  track: CloudTrack,
   position: number,
   playbackSpeed: number,
-): Promise<void> {
-  if (!isAppwriteConfigured()) return;
+): Promise<boolean> {
+  if (!isAppwriteConfigured()) return false;
 
   const deviceId = await getDeviceId();
 
@@ -391,11 +400,42 @@ export async function savePlaybackState(
         data,
       );
     } else {
-      await databases.createDocument(DATABASE_ID, USER_PLAYBACK_COLLECTION, "unique()", data);
+      // ID.unique() generates a real document id — the literal string
+      // "unique()" would be stored as the id, so every later create would
+      // collide with that same bogus row.
+      await databases.createDocument(DATABASE_ID, USER_PLAYBACK_COLLECTION, ID.unique(), data);
     }
+    return true;
   } catch (error) {
     console.error("Failed to save playback state:", error);
+    return false;
   }
+}
+
+/**
+ * Best-effort cloud save of the playback state (web parity: same signature and
+ * never-throws contract). Callers that need to know whether the write landed
+ * should use `trySavePlaybackState` instead.
+ */
+export async function savePlaybackState(
+  track: CloudTrack,
+  position: number,
+  playbackSpeed: number,
+): Promise<void> {
+  await upsertPlaybackState(track, position, playbackSpeed);
+}
+
+/**
+ * Same as `savePlaybackState` but resolves to `true` only when the document
+ * was written. `false` covers both "backend unconfigured" and "request
+ * failed", which is exactly when the local mirror should stay unsynced.
+ */
+export async function trySavePlaybackState(
+  track: CloudTrack,
+  position: number,
+  playbackSpeed: number,
+): Promise<boolean> {
+  return upsertPlaybackState(track, position, playbackSpeed);
 }
 
 export async function loadPlaybackState(): Promise<{

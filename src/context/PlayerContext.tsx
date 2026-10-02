@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { EmitterSubscription } from "react-native";
+import NetInfo from "@react-native-community/netinfo";
 import TrackPlayer, {
   Event,
   PlaybackState,
@@ -10,7 +11,6 @@ import type { MediaItem } from "@rntp/player";
 import {
   loadQueueState,
   mediaItemToTrack,
-  persistCloudState,
   resolveLocalAudio,
   saveQueueState,
   setupPlayer,
@@ -18,13 +18,19 @@ import {
 } from "@/audio/player";
 import {
   addHistoryEntry,
+  clearLocalPlaybackState,
   getPlaybackHistory,
   getSettings,
   updatePlaybackProgress,
   updateSettings,
 } from "@/lib/db";
 import { PLAYBACK_SPEEDS } from "@/lib/utils";
-import { clearPlaybackState, isAppwriteConfigured, savePlaybackState } from "@/lib/appwrite";
+import { clearPlaybackState, getDeviceId, isAppwriteConfigured } from "@/lib/appwrite";
+import {
+  getLocalPlaybackStateFor,
+  persistPlaybackState,
+  syncPlaybackStateIfPending,
+} from "@/lib/playbackSync";
 import { trackPlayComplete, trackPlayStart } from "@/lib/analytics";
 import type { CurrentTrack, RepeatMode } from "@/types";
 
@@ -153,6 +159,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const isMuted = volume === 0;
 
+  // Drain the local playback-state mirror once connectivity returns. A position
+  // saved while offline (or logged out) stays `synced: false` in AsyncStorage
+  // until this pushes it, so the cloud copy is never left behind. NetInfo is
+  // already a dependency (OfflineBanner) — no reconnect events on AppState
+  // alone, so this is the reliable trigger.
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      // `isConnected` is null while NetInfo resolves; only a definite "online"
+      // should trigger a drain.
+      if (state.isConnected === true && state.isInternetReachable !== false) {
+        void syncPlaybackStateIfPending();
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Persist progress when playback pauses from ANY source — in-app button,
   // notification / lock-screen pause, headset disconnect, audio interruption.
   // (OS remote presses drive the native player directly, bypassing togglePlay.)
@@ -162,7 +184,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const pos = Math.floor(positionRef.current);
     const total = Math.floor(durationRef.current || current.duration || 0);
     updatePlaybackProgress(current.id, pos, total, false, trackMeta(current)).catch(() => {});
-    void persistCloudState(current, pos, rateRef.current);
+    void persistPlaybackState(current, pos, rateRef.current);
   }, []);
 
   /**
@@ -215,7 +237,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (next.type === "episode" || next.type === "radio") {
       trackPlayStart(next.id, next.type, next.title);
     }
-    void persistCloudState(next, 0, rateRef.current);
+    void persistPlaybackState(next, 0, rateRef.current);
   }, []);
 
   /** Read the native active index and run the shared transition path. */
@@ -278,7 +300,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (next.type === "episode" || next.type === "radio") {
       trackPlayStart(next.id, next.type, next.title);
     }
-    void persistCloudState(next, 0, rateRef.current);
+    void persistPlaybackState(next, 0, rateRef.current);
   }, []);
 
   const playIndex = useCallback(
@@ -482,6 +504,31 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Corrupt queue state: start fresh.
       }
+
+      // Cold start after an offline session: the cloud copy may have never
+      // been written (and local history has nothing usable above), so fall
+      // back to the local mirror — it holds the last position we saw for this
+      // track even when the app was offline or logged out the whole time.
+      try {
+        const current = trackRef.current;
+        if (current && resumeOffsetRef.current == null) {
+          const mirrored = await getLocalPlaybackStateFor(current.id);
+          if (cancelled) return;
+          if (mirrored && mirrored.position > 0) {
+            resumeOffsetRef.current = mirrored.position;
+            resumeIndexRef.current = queueIndexRef.current;
+            resumeTrackIdRef.current = current.id;
+          }
+        }
+      } catch {
+        // Mirror unreadable; playback starts at 0.
+      }
+
+      // Opportunistic drain on launch: a pending row from a previous offline
+      // session is pushed to the cloud now that we know the backend may be
+      // reachable (a no-op failure when we are still offline).
+      void syncPlaybackStateIfPending();
+
       if (cancelled) {
         cleanup();
         return;
@@ -538,7 +585,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (finished.type === "episode") {
               trackPlayComplete(finished.id, finished.type, finished.title, total);
             }
-            void persistCloudState(finished, total, rateRef.current);
+            void persistPlaybackState(finished, total, rateRef.current);
             // Native RepeatMode handles actual looping (one/all). At queue
             // end with repeat off the player stays idle — no manual advance.
           }
@@ -867,15 +914,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   /**
    * Mirror the web behaviour (AudioContext.setPlaybackSpeed): persist the new
-   * rate with the current position so a cloud resume is not stale. No-ops when
-   * unconfigured/unauthenticated and never throws.
+   * rate with the current position so a cloud resume is not stale. Routed
+   * through the local-first writer, so a speed change made offline is also
+   * captured in the mirror. Never throws.
    */
   const pushSpeedToCloud = useCallback((speed: number) => {
     const current = trackRef.current;
     if (!current || current.type === "radio" || !isAppwriteConfigured()) return;
     const pos = Math.floor(positionRef.current);
     const total = Math.floor(durationRef.current || current.duration || 0);
-    void savePlaybackState({ ...current, duration: total }, pos, speed).catch(() => {});
+    void persistPlaybackState({ ...current, duration: total }, pos, speed).catch(() => {});
   }, []);
 
   const changeSpeed = useCallback(async () => {
@@ -992,6 +1040,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     queueIndexRef.current = 0;
     queueRef.current = [];
     clearPlaybackState().catch(() => {});
+    // Drop the local mirror too, otherwise a pending row would be drained back
+    // to the cloud on the next reconnect and re-create the stopped position.
+    getDeviceId()
+      .then((deviceId) => clearLocalPlaybackState(deviceId))
+      .catch(() => {});
   }, []);
 
   const value = useMemo<PlayerContextValue>(

@@ -180,6 +180,80 @@ export async function deleteHistoryEntry(episodeId: string): Promise<void> {
   );
 }
 
+// ─── Playback state (local mirror of the cloud `user_playback` doc) ─────────
+
+/**
+ * Local-first mirror of the device's playback position (web parity: minbar
+ * `db.ts` `SavedPlaybackState`). Written on every pause/track change *before*
+ * the cloud write is attempted, so a position saved while offline or logged
+ * out survives a cold start. `synced` is false until the cloud write succeeds;
+ * `syncPlaybackStateIfPending` drains it once connectivity returns.
+ *
+ * Only one row exists per install (the app has a single stable device id), but
+ * the collection is stored as an array so the deviceId lookup mirrors the web
+ * Dexie table and survives a device-id change.
+ */
+export interface SavedPlaybackState {
+  deviceId: string;
+  trackId: string;
+  trackType: "episode" | "radio" | "dua";
+  trackTitle: string;
+  trackAudioUrl: string;
+  trackArtworkUrl?: string;
+  trackSpeaker?: string;
+  trackDuration: number;
+  trackSeriesId?: string;
+  trackEpisodeNumber?: number;
+  position: number;
+  playbackSpeed: number;
+  /** Revived from the JSON string on read — see `readPlaybackStates`. */
+  updatedAt: Date;
+  synced: boolean;
+}
+
+/** AsyncStorage has no Date revival, so rehydrate `updatedAt` on every read. */
+function readPlaybackStates(): Promise<SavedPlaybackState[]> {
+  return read<SavedPlaybackState[]>("playback-state", []).then((rows) =>
+    rows.map((row) => ({ ...row, updatedAt: new Date(row.updatedAt) })),
+  );
+}
+
+export async function saveLocalPlaybackState(
+  state: Omit<SavedPlaybackState, "id">,
+): Promise<void> {
+  const all = await readPlaybackStates();
+  const existing = all.find((row) => row.deviceId === state.deviceId);
+  if (existing) {
+    await write(
+      "playback-state",
+      all.map((row) => (row.deviceId === state.deviceId ? { ...state } : row)),
+    );
+  } else {
+    await write("playback-state", [...all, { ...state }]);
+  }
+}
+
+export async function getLocalPlaybackState(
+  deviceId: string,
+): Promise<SavedPlaybackState | undefined> {
+  const all = await readPlaybackStates();
+  return all.find((row) => row.deviceId === deviceId);
+}
+
+export async function clearLocalPlaybackState(deviceId: string): Promise<void> {
+  const all = await readPlaybackStates();
+  await write(
+    "playback-state",
+    all.filter((row) => row.deviceId !== deviceId),
+  );
+}
+
+/** The single offline-playback row awaiting a cloud write, if any. */
+export async function getUnsyncedPlaybackState(): Promise<SavedPlaybackState | undefined> {
+  const all = await readPlaybackStates();
+  return all.find((row) => !row.synced);
+}
+
 // ─── Bookmarks ──────────────────────────────────────────────────────────────
 
 export async function addBookmark(bookmark: Omit<Bookmark, "id">): Promise<number> {
